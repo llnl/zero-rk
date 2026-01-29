@@ -507,7 +507,7 @@ g30:
     if (faccon * dyno > fnewt) goto g40;
     // --- error estimation
     err = estrad(y);
-    if (isnan(err)) goto g78;  // test
+    if (std::isnan(err)) goto g78;  // test
     // --- compute finite differences for dense output
     if (err < 1.0) {
       N_VLinearSum(1.0, y, 1.0, zz[2], y);
@@ -692,7 +692,7 @@ g30:
     if (faccon * dyno > fnewt) goto g140;
     // --- error estimation
     err = estrav(y);
-    if (isnan(err)) goto g78;  // test
+    if (std::isnan(err)) goto g78;  // test
     //       --- compute finite differences for dense output
     //       TODO: PROBLEM HERE?
     if (err < 1.0) {
@@ -960,7 +960,7 @@ g30:
     if (faccon * dyno > fnewt) goto g240;
     // --- error estimation
     err = estrav(y);
-    if (isnan(err)) goto g78;  // test
+    if (std::isnan(err)) goto g78;  // test
     // --- compute finite differences for dense output
     if (err < 1.0) {
       N_VLinearSum(1.0, y, 1.0, zz[6], y);
@@ -1045,7 +1045,7 @@ g30:
     if (faccon * dyno > fnewt) goto g440;
     // --- error estimation
     err = estrav(y);
-    if (isnan(err)) goto g78;  // test
+    if (std::isnan(err)) goto g78;  // test
     // --- compute finite differences for dense output
     if (err < 1.0) {
       N_VLinearSum(1.0, y, 1.0, zz[0], y);
