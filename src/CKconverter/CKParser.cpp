@@ -1377,7 +1377,10 @@ next:
                     throw CK_SyntaxError(*m_log, "negative prefactor", m_line);
 
                 if (debug) *m_log << "Processing products..." << sright << endl;
-                sright = sright.substr(0, sright.find(toks[ntoks - 3]) - 1 );
+                sright = "";
+		for(int i=0; i<ntoks-3;++i) {
+			sright += toks[i];
+		}
                 if (debug) *m_log << "After removing Arrhenius parameters, "
                                 << "\nproduct string = " << sright << endl;
 
