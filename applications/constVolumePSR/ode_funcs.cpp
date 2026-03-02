@@ -89,3 +89,13 @@ int const_vol_wsr(realtype t, N_Vector y, N_Vector ydot,
   cvp->funcTime += getHighResolutionTime() - startTime;
   return 0;
 }
+
+int tempRootFunc(realtype t, N_Vector y, realtype *rootFunc,
+		 void *user_data)
+{
+  cv_param *cvp=(cv_param *)user_data;
+
+  rootFunc[0]=NV_Ith_S(y,cvp->nSpc)*cvp->Tref - cvp->tempRoot;
+
+  return 0;
+}

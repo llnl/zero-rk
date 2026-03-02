@@ -281,6 +281,10 @@ void cvReactor(int inp_argc, char **inp_argv)
   flag = CVodeSetMaxStep(cvode_mem, idt_ctrl.getMaxInternalDt());
   if (check_flag(&flag, "CVodeSetMaxStep", 1)) exit(-1);
 
+  //This is helping us catch extinction
+  flag = CVodeRootInit(cvode_mem, 1, tempRootFunc);
+  if (check_flag(&flag, "CVodeRootInit", 1)) exit(-1);
+
   flag = CVodeSetNonlinConvCoef(cvode_mem, idt_ctrl.getNlConvCoeff()); // Default [0.1]
 #if defined SUNDIALS2 || defined SUNDIALS3
   flag = CVSpilsSetEpsLin(cvode_mem, idt_ctrl.getEpsLin());    // Default [0.05]
@@ -403,6 +407,7 @@ void cvReactor(int inp_argc, char **inp_argv)
     systemParam.mass=systemParam.Dens*systemParam.volume;
     NV_Ith_S(systemState,nSpc+1)=systemParam.mass;
 
+    systemParam.tempRoot = idt_ctrl.getInitTemp() + 50; //50 K higher than the inlet
 
     // reset the time
     tcurr=0.0;
@@ -434,6 +439,19 @@ void cvReactor(int inp_argc, char **inp_argv)
           flag = CVode(cvode_mem, tnext, systemState, &tcurr, CV_NORMAL);
         }
 
+	bool extinguishing = false;
+	if(flag == CV_ROOT_RETURN) {
+          int root_found;
+          flag = CVodeGetRootInfo(cvode_mem, &root_found);
+          if(flag != CV_SUCCESS) {
+            printf("ERROR: CVodeGetRootInfo failed.\n");
+            exit(1);
+          }
+	  if(root_found < 0) {
+	    //Passed our extinction temperature decreasing
+	    extinguishing = true;
+	  }
+        }
         if (check_flag(&flag, "CVODE ERROR", 1)) {
 
           isBadStep = 1;
@@ -494,6 +512,7 @@ void cvReactor(int inp_argc, char **inp_argv)
 #endif
 
         tnext+=dtprint;
+	if(extinguishing) break;
       }
 
       if(idt_ctrl.dumpJacobian()) {

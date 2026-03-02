@@ -7,4 +7,7 @@
 int const_vol_wsr(realtype t, N_Vector y, N_Vector ydot,
 		  void *user_data);
 
+int tempRootFunc(realtype t, N_Vector y, realtype *rootFunc,
+		 void *user_data);
+
 #endif
