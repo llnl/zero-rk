@@ -312,6 +312,15 @@ spify_parser_params.append(
 }
 )
 
+spify_parser_params.append(
+{
+    'name':'pseudo_unsteady_time',
+    'type':'double',
+    'longDesc' : "End time for pseudo-unsteady time-stepping",
+    'defaultValue' : 0.05
+}
+)
+
 
 spify_parser_params.append(
 {
@@ -324,10 +333,10 @@ spify_parser_params.append(
 
 spify_parser_params.append(
 {
-    'name':'max_num_steps',
+    'name':'max_kinsol_iters',
     'type':'double',
-    'shortDesc' : "Maximum Number of Integrator Steps",
-    'defaultValue' : 1000000
+    'shortDesc' : "Maximum Number of KINSOL Iterations",
+    'defaultValue' : 100
 }
 )
 
@@ -489,6 +498,24 @@ spify_parser_params.append(
     'name':'use_equilibrium_for_init',
     'type':'bool',
     'longDesc' : "Flag that when set to true [y] uses equilibrium solver to set initial conditions",
+    'defaultValue' : 0
+}
+)
+
+spify_parser_params.append(
+{
+    'name':'write_mole_fractions_to_field_files',
+    'type':'bool',
+    'longDesc' : "Flag that when set to true [y] includes mole fractions in field file output",
+    'defaultValue' : 0
+}
+)
+
+spify_parser_params.append(
+{
+    'name':'write_step_rates_to_field_files',
+    'type':'bool',
+    'longDesc' : "Flag that when set to true [y] includes step rates in field file output",
     'defaultValue' : 0
 }
 )

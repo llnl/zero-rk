@@ -23,7 +23,6 @@ mpi_counter::mpi_counter(MPI_Comm comm, int hostrank) {
         MPI_Win_create(nullptr, 0, 1,
                        MPI_INFO_NULL, comm_, &win_);
     }
-    my_val_ = 0;
 }
 
 mpi_counter::~mpi_counter() {
@@ -34,37 +33,35 @@ int mpi_counter::increment(int amount) {
     std::vector<int> vals(size_, 0);
 
     MPI_Win_lock(MPI_LOCK_EXCLUSIVE, host_rank_, 0, win_);
-
-    for (int i=0; i<size_; i++) {
-      if (i == rank_) {
-        MPI_Accumulate(&amount, 1, MPI_INT, host_rank_, i, 1, MPI_INT, MPI_SUM,
-                       win_);
-      } else {
-        MPI_Get(&vals[i], 1, MPI_INT, host_rank_, i, 1, MPI_INT, win_);
-      }
-    }
-
+    MPI_Get(vals.data(), size_, MPI_INT, host_rank_, 0, size_, MPI_INT, win_);
+    MPI_Accumulate(&amount, 1, MPI_INT, host_rank_, rank_, 1, MPI_INT, MPI_SUM, win_);
     MPI_Win_unlock(host_rank_, win_);
-
-    vals[rank_] = my_val_;
 
     int val = 0;
     for (int i=0; i<size_; i++) {
       val += vals[i];
     }
 
-    my_val_ += amount;
-
     return val; //value prior to increment
 }
 
+void mpi_counter::reset() {
+  if (rank_ == host_rank_) {
+    MPI_Win_lock(MPI_LOCK_EXCLUSIVE, host_rank_, 0, win_);
+    for (int i=0; i<size_; i++) {
+      data_[i] = 0;
+    }
+    MPI_Win_unlock(host_rank_, win_);
+  }
+  MPI_Barrier(comm_);
+}
 
 void mpi_counter::print() {
   if (rank_ == host_rank_) {
     for (int i=0; i<size_; i++) {
         printf("%2d ", data_[i]);
     }
-    puts("");
+    printf("\n");
   }
   fflush(stdout);
 }

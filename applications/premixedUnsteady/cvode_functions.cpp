@@ -522,7 +522,7 @@ int ConstPressureFlameLocal(int nlocal,
 #ifdef ZERORK_MPI
   MPI_Allreduce(&local_max,&params->max_temperature_,1,PVEC_REAL_MPI_TYPE,MPI_MAX,comm);
 #else
-  params->max_temperature_;
+  params->max_temperature_ = local_max;
 #endif
 
   double gradT;

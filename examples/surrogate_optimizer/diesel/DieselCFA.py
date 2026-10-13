@@ -1,7 +1,7 @@
 #!/bin/env python
 
 import numpy
-from pyDOE import lhs
+from pydoe import lhs
 from zerork import *
 
 def get_mixture(db_file="./Database.csv"):
@@ -187,10 +187,10 @@ def main():
     mixture = get_mixture()
     targets = get_targets()
     species = get_species_list()
-    NUM_TRIALS=5
+    NUM_TRIALS=3
     starting_comp_vfs = lhs(len(species), NUM_TRIALS)
     vfs_best_arr = []
-    bh_kwargs = {"niter": 25, "niter_success": 5}
+    bh_kwargs = {"niter": 20, "niter_success": 5}
     global_best = (numpy.inf, {})
 
     for i in range(NUM_TRIALS):

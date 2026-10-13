@@ -16,9 +16,16 @@ classifiers = [
     'Private :: Do Not Upload' #Do not publish to PyPI
 ]
 keywords=['zerork', 'zeror-rk', 'kinetics']
-dependencies = [ 'ruamel.yaml', 'numpy', 'scipy', 'matplotlib', 'dill', 'pyDOE', 'mpi4py', 'tqdm', 'ctREFPROP']
+dependencies = [ 'ruamel.yaml', 'numpy', 'scipy', 'matplotlib', 
+                 'dill', 'pydoe', 'mpi4py', 'tqdm', 'ctREFPROP',
+                 'importlib_resources']
 
 [build-system]
 requires = ["setuptools>=61.0",
             "setuptools-scm>=8.0"] # this is so setuptools can find data files
 build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["zerork*"]
+

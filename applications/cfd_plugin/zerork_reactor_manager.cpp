@@ -3,6 +3,7 @@
 #include "mpi.h"
 #endif
 
+#include <cassert>
 #include <iomanip>
 #include <stdexcept>
 
@@ -353,8 +354,9 @@ int ZeroRKReactorManager::RecvReactors(size_t send_rank) {
   temp_delta_other_.resize(n_reactors_other_);
   mf_other_.resize(n_reactors_other_*num_species_);
 
+  const int load_balance_mem = int_options_["load_balance_mem"];
   std::vector<double> recv_buf(tx_count_per_reactor_+extra_tx_count);
-  if(int_options_["load_balance_mem"] != 0) {
+  if(load_balance_mem != 0) {
     recv_buf.resize((tx_count_per_reactor_+extra_tx_count)*n_recv_reactors);
     MPI_Recv(&recv_buf[0],(tx_count_per_reactor_+extra_tx_count)*n_recv_reactors,
              MPI_DOUBLE, send_rank, EXCHANGE_SEND_TAG_,
@@ -363,7 +365,7 @@ int ZeroRKReactorManager::RecvReactors(size_t send_rank) {
   size_t buf_idx = 0;
   for(size_t i = 0; i < n_recv_reactors; ++i, ++recv_idx) {
      //Bring 'em in
-     if(int_options_["load_balance_mem"] == 0) {
+     if(load_balance_mem == 0) {
        MPI_Recv(&recv_buf[0],tx_count_per_reactor_+extra_tx_count,
                 MPI_DOUBLE, send_rank, EXCHANGE_SEND_TAG_,
                 MPI_COMM_WORLD, &status);
@@ -423,14 +425,15 @@ void ZeroRKReactorManager::SendReactors(std::vector<size_t> send_reactor_idxs, s
   if(e_src_defined_) extra_tx_count+=1;
   if(y_src_defined_) extra_tx_count+=num_species_;
   std::vector<double> send_buf;
-  if(int_options_["load_balance_mem"] == 0) {
+  const int load_balance_mem = int_options_["load_balance_mem"];
+  if(load_balance_mem == 0) {
     send_buf.resize(tx_count_per_reactor_+extra_tx_count);
   } else {
     send_buf.resize((tx_count_per_reactor_+extra_tx_count)*send_nreactors);
   }
   int buf_idx = 0;
   for(int i = 0; i < send_nreactors; ++i) {
-    if(int_options_["load_balance_mem"] == 0) {
+    if(load_balance_mem == 0) {
       buf_idx = 0;
     }
     int send_idx = send_reactor_idxs[i];
@@ -461,12 +464,12 @@ void ZeroRKReactorManager::SendReactors(std::vector<size_t> send_reactor_idxs, s
     memcpy(&send_buf[buf_idx], &temp_delta_self_[send_idx], sizeof(double));
     buf_idx += 1;
 
-    if(int_options_["load_balance_mem"] == 0) {
+    if(load_balance_mem == 0) {
       MPI_Send(&send_buf[0], tx_count_per_reactor_+extra_tx_count,
                MPI_DOUBLE, (int) recv_rank, EXCHANGE_SEND_TAG_, MPI_COMM_WORLD);
     }
   }
-  if(int_options_["load_balance_mem"] != 0) {
+  if(load_balance_mem != 0) {
     MPI_Send(&send_buf[0], send_nreactors*(tx_count_per_reactor_+extra_tx_count),
              MPI_DOUBLE, (int) recv_rank, EXCHANGE_SEND_TAG_, MPI_COMM_WORLD);
   }
@@ -658,21 +661,24 @@ zerork_status_t ZeroRKReactorManager::LoadBalance()
 #else
 zerork_status_t ZeroRKReactorManager::LoadBalance()
 {
-  if(nranks_ == 1 || !int_options_["load_balance"]) {
+  const int load_balance = int_options_["load_balance"];
+  if(nranks_ == 1 || !load_balance) {
     return ZERORK_STATUS_SUCCESS;
   }
 
+  const int load_balance_noise = int_options_["load_balance_noise"];
+  const int reactor_weight_mult = int_options_["reactor_weight_mult"];
   int n_weighted_reactors = 0;
   std::vector<int> weighted_reactors_on_rank(nranks_,0);
-  if(int_options_["load_balance"] == 1) {
+  if(load_balance == 1) {
     for(int k = 0; k < n_reactors_self_; ++k) {
       if(rc_self_[k] <= 0.0) rc_self_[k] = 1.0;
-      n_weighted_reactors += std::max((int)rc_self_[k],1)+int_options_["load_balance_noise"];
+      n_weighted_reactors += std::max((int)rc_self_[k],1)+load_balance_noise;
     }
-  } else if (int_options_["load_balance"] == 2) {
+  } else if (load_balance == 2) {
     for(int k = 0; k < n_reactors_self_; ++k) {
         if(rg_self_[k] <= 0.0) rg_self_[k] = avg_reactor_time_;
-        int weighted = (int)(int_options_["reactor_weight_mult"]*rg_self_[k]/avg_reactor_time_);
+        int weighted = (int)(reactor_weight_mult*rg_self_[k]/avg_reactor_time_);
         n_weighted_reactors += std::max(weighted,1);
     }
   }
@@ -709,9 +715,10 @@ zerork_status_t ZeroRKReactorManager::LoadBalance()
     total_wanted += reactors_wanted[i];
   }
 
+  int verbosity = int_options_["verbosity"];
   for(int i = 0; i < nranks_; ++i) {
     reactor_deficit[i] = reactors_wanted[i] - weighted_reactors_on_rank[i];
-    if(rank_==root_rank_ && int_options_["verbosity"] > 0) {
+    if(rank_==root_rank_ && verbosity > 0) {
       printf("Rank[%d] reactors_wanted, weighted_reactors, reactor_deficit,"
              " rank_weight: %d, %d, %d, %f\n",
              i, reactors_wanted[i], weighted_reactors_on_rank[i],
@@ -789,10 +796,10 @@ zerork_status_t ZeroRKReactorManager::LoadBalance()
           while(send_count < send_weighted_nreactors && send_idx>0) {
             send_idx -= 1;
             size_t sorted_reactor_idx = sorted_reactor_idxs_[send_idx];
-            if(int_options_["load_balance"] == 1) {
-              send_count += std::max((int)rc_self_[sorted_reactor_idx],1)+int_options_["load_balance_noise"];
-            } else if(int_options_["load_balance"] == 2) {
-              int weighted = (int) (int_options_["reactor_weight_mult"]*rg_self_[sorted_reactor_idx]/avg_reactor_time_);
+            if(load_balance == 1) {
+              send_count += std::max((int)rc_self_[sorted_reactor_idx],1)+load_balance_noise;
+            } else if(load_balance == 2) {
+              int weighted = (int) (reactor_weight_mult*rg_self_[sorted_reactor_idx]/avg_reactor_time_);
               send_count += std::max(weighted,1);
             }
             send_reactor_idxs.push_back(sorted_reactor_idx);
@@ -845,7 +852,8 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
   n_gpu_solve_ = 0;
   n_gpu_solve_no_temperature_ = 0;
 
-  int always_solve_temp = int_options_["always_solve_temperature"];
+  const int always_solve_temp = int_options_["always_solve_temperature"];
+  const bool dump_reactors = (int_options_["dump_reactors"]!=0);
 
   int n_reactors_self_calc = n_reactors_self_ + n_reactors_other_;
   std::vector<int> solved_gpu(n_reactors_self_calc, 0);
@@ -901,16 +909,22 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
       temp_delta_ptrs[j] = &temp_delta_other_[j_sort];
       mf_ptrs[j] = &mf_other_[j_sort*num_species_];
     }
-    if(int_options_["dump_reactors"]!=0) {
+    if(dump_reactors) {
       DumpReactor("pre", j, *T_ptrs[j], *P_ptrs[j], *rc_ptrs[j], *rg_ptrs[j], mf_ptrs[j]);
     }
   }
 
+  const int verbosity = int_options_["verbosity"];
+  const int integrator = int_options_["integrator"];
+  const bool constant_volume = (int_options_["constant_volume"] == 1);
+  const double solve_temp_threshold = double_options_["solve_temperature_threshold"];
 #ifdef ZERORK_GPU
+  const int n_reactors_min = int_options_["n_reactors_min"];
+  const int n_reactors_max = int_options_["n_reactors_max"];
   if(int_options_["gpu"] != 0 && rank_has_gpu_[rank_]) {
     //Instantiate reactors on first call, after options are set
     if(!reactor_gpu_ptr_) {
-      if(int_options_["constant_volume"] == 1) {
+      if(constant_volume) {
         reactor_gpu_ptr_ = std::make_unique<ReactorConstantVolumeGPU>(mech_cuda_ptr_);
       } else {
         reactor_gpu_ptr_ = std::make_unique<ReactorConstantPressureGPU>(mech_cuda_ptr_);
@@ -919,26 +933,26 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
     reactor_gpu_ptr_->SetIntOptions(int_options_);
     reactor_gpu_ptr_->SetDoubleOptions(double_options_);
 
-    std::vector<double> T_gpu(int_options_["n_reactors_max"]);
-    std::vector<double> T_gpu_init(int_options_["n_reactors_max"]);
-    std::vector<double> P_gpu(int_options_["n_reactors_max"]);
+    std::vector<double> T_gpu(n_reactors_max);
+    std::vector<double> T_gpu_init(n_reactors_max);
+    std::vector<double> P_gpu(n_reactors_max);
     std::vector<double> dpdt_gpu;
-    if(dpdt_defined_) dpdt_gpu.resize(int_options_["n_reactors_max"]);
+    if(dpdt_defined_) dpdt_gpu.resize(n_reactors_max);
     std::vector<double> e_src_gpu;
-    if(e_src_defined_) e_src_gpu.resize(int_options_["n_reactors_max"]);
+    if(e_src_defined_) e_src_gpu.resize(n_reactors_max);
     std::vector<double> y_src_gpu;
-    if(y_src_defined_) y_src_gpu.resize(num_species_*int_options_["n_reactors_max"]);
-    std::vector<double> mf_gpu(num_species_*int_options_["n_reactors_max"]);
+    if(y_src_defined_) y_src_gpu.resize(num_species_*n_reactors_max);
+    std::vector<double> mf_gpu(num_species_*n_reactors_max);
     int n_remaining = n_reactors_self_calc;
     while(n_remaining > 0) {
       int n_curr = 1;
-      n_curr = std::min(n_remaining, int_options_["n_reactors_max"]);
-      if(n_curr != n_remaining && n_remaining < 2*int_options_["n_reactors_max"] && n_curr == int_options_["n_reactors_max"]) {
+      n_curr = std::min(n_remaining, n_reactors_max);
+      if(n_curr != n_remaining && n_remaining < 2*n_reactors_max && n_curr == n_reactors_max) {
         n_curr = n_remaining/2;
       }
 
-      if(n_curr >= int_options_["n_reactors_min"]) {
-        if(int_options_["verbosity"] >= 2) {
+      if(n_curr >= n_reactors_min) {
+        if(verbosity >= 2) {
             printf("RANK[%d]: Solving GPU group of size = %d.\n", rank_,n_curr);
         }
         n_gpu_groups_++;
@@ -963,10 +977,10 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
             e_src_gpu[k_reactor_curr] = *e_src_ptrs[k_reactor];
           }
           for(int j = 0; j < num_species_; ++j) {
-            //Transpose mass fractions
-            mf_gpu[j*n_curr+k_reactor_curr] = mf_ptrs[k_reactor][j];
+            //mass fractions will be transposed in reactor InitializeState
+            mf_gpu[k_reactor_curr*num_species_+j] = mf_ptrs[k_reactor][j];
             if(y_src_defined_) {
-              y_src_gpu[j*n_curr+k_reactor_curr] = y_src_ptrs[k_reactor][j];
+              y_src_gpu[k_reactor_curr*num_species_+j] = y_src_ptrs[k_reactor][j];
             }
           }
           if(*temp_delta_ptrs[k_reactor] > 0.0 || always_solve_temp == 1) {
@@ -976,13 +990,13 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
 
         long int nstep_reactors;
         std::unique_ptr<SolverBase> solver;
-        if(int_options_["integrator"] == 0) {
+        if(integrator == 0) {
           solver.reset(new CvodeSolver(*reactor_gpu_ptr_));
-        } else if(int_options_["integrator"] == 1) {
+        } else if(integrator == 1) {
           solver.reset(new SeulexSolver(*reactor_gpu_ptr_));
-        } else if(int_options_["integrator"] == 2) {
+        } else if(integrator == 2) {
           solver.reset(new SodexSolver(*reactor_gpu_ptr_));
-        } else if(int_options_["integrator"] == 3) {
+        } else if(integrator == 3) {
           solver.reset(new RadauSolver(*reactor_gpu_ptr_));
         } else {
           throw(std::runtime_error("Invalid integrator specified for GPU"));
@@ -1028,18 +1042,17 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
             *T_ptrs[k_reactor] = T_gpu[k_reactor_curr];
             *P_ptrs[k_reactor] = P_gpu[k_reactor_curr];
             for(int j = 0; j < num_species_; ++j) {
-              //Transpose mass fractions
-              mf_ptrs[k_reactor][j] = mf_gpu[j*n_curr+k_reactor_curr];
+              mf_ptrs[k_reactor][j] = mf_gpu[k_reactor_curr*num_species_+j];
             }
             solved_gpu[k_reactor] = 1;
             *rc_ptrs[k_reactor] = nstep_reactors;
             *rg_ptrs[k_reactor] = reactor_time/n_curr*gpu_multiplier_;
 
             double temp_delta = T_gpu[k_reactor_curr] - T_gpu_init[k_reactor_curr];
-            if(temp_delta < double_options_["solve_temperature_threshold"]) temp_delta = 0.0;
+            if(temp_delta < solve_temp_threshold) temp_delta = 0.0;
             *temp_delta_ptrs[k_reactor] = temp_delta;
 
-            if(int_options_["dump_reactors"]!=0) {
+            if(dump_reactors) {
               DumpReactor("postg", k_reactor, *T_ptrs[k_reactor], *P_ptrs[k_reactor],
                           *rc_ptrs[k_reactor], *rg_ptrs[k_reactor], mf_ptrs[k_reactor]);
             }
@@ -1055,7 +1068,7 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
 
   //Instantiate reactors on first call, after options are set
   if(!reactor_ptr_) {
-    if(int_options_["constant_volume"] == 1) {
+    if(constant_volume) {
       reactor_ptr_ = std::make_unique<ReactorConstantVolumeCPU>(mech_ptr_);
     } else {
       reactor_ptr_ = std::make_unique<ReactorConstantPressureCPU>(mech_ptr_);
@@ -1066,13 +1079,13 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
   reactor_ptr_->SetDoubleOptions(double_options_);
 
   std::unique_ptr<SolverBase> solver;
-  if(int_options_["integrator"] == 0) {
+  if(integrator == 0) {
     solver.reset(new CvodeSolver(*reactor_ptr_));
-  } else if(int_options_["integrator"] == 1) {
+  } else if(integrator == 1) {
     solver.reset(new SeulexSolver(*reactor_ptr_));
-  } else if(int_options_["integrator"] == 2) {
+  } else if(integrator == 2) {
     solver.reset(new SodexSolver(*reactor_ptr_));
-  } else if(int_options_["integrator"] == 3) {
+  } else if(integrator == 3) {
     solver.reset(new RadauSolver(*reactor_ptr_));
   } else {
     throw(std::runtime_error("Invalid integrator specified"));
@@ -1086,6 +1099,7 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
   reactor_ptr_->SetIntOption("iterative",solver->Iterative());
   reactor_ptr_->SetStepLimiter(double_options_["step_limiter"]);
 
+  const int dump_failed_reactors = int_options_["dump_failed_reactors"];
   zerork_status_t flag = ZERORK_STATUS_SUCCESS;
   for(int k = 0; k < n_reactors_self_calc; ++k)
   {
@@ -1122,7 +1136,7 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
       double reactor_time = getHighResolutionTime() - start_time;
       if(nsteps < 0) {
         flag = ZERORK_STATUS_FAILED_SOLVE;
-        if(int_options_["dump_failed_reactors"]!=0) {
+        if(dump_failed_reactors!=0) {
           DumpReactor("failed_state", k, *T_ptrs[k], *P_ptrs[k],
                       *rc_ptrs[k], *rg_ptrs[k], mf_ptrs[k]);
         }
@@ -1131,7 +1145,7 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
         *root_times_ptrs[k] = reactor_ptr_->GetRootTime();
         n_steps_cpu_ += nsteps;
         double temp_delta = *T_ptrs[k] - T_init;
-        if(temp_delta < double_options_["solve_temperature_threshold"]) temp_delta = 0.0;
+        if(temp_delta < solve_temp_threshold) temp_delta = 0.0;
         *temp_delta_ptrs[k] = temp_delta;
       }
       *rc_ptrs[k] = nsteps;
@@ -1139,7 +1153,7 @@ zerork_status_t ZeroRKReactorManager::SolveReactors()
       sum_cpu_reactor_time_ += reactor_time;
       ++n_cpu_solve_;
       if(!solve_temperature) ++n_cpu_solve_no_temperature_;
-      if(int_options_["dump_reactors"]!=0) {
+      if(dump_reactors) {
         DumpReactor("postc", k, *T_ptrs[k], *P_ptrs[k],
                     *rc_ptrs[k], *rg_ptrs[k], mf_ptrs[k]);
       }
@@ -1168,6 +1182,7 @@ zerork_status_t ZeroRKReactorManager::RedistributeResults()
   MPI_Barrier(MPI_COMM_WORLD);
   //double synchTime = getHighResolutionTime() - startTime;
 
+  const int load_balance_mem = int_options_["load_balance_mem"];
   if(n_reactors_other_ > 0) {
     int send_idx = 0;
     for(int i = comm_mtx_row_sum_[sorted_rank_]; i < comm_mtx_row_sum_[sorted_rank_+1]; ++i)
@@ -1178,12 +1193,12 @@ zerork_status_t ZeroRKReactorManager::RedistributeResults()
       if(send_nreactors > 0)
       {
         std::vector<double> send_buf(6+num_species_);
-        if(int_options_["load_balance_mem"] != 0) {
+        if(load_balance_mem != 0) {
           send_buf.resize((6+num_species_)*send_nreactors);
         }
         int buf_idx = 0;
         for(int k = 0; k < send_nreactors; ++k) {
-          if(int_options_["load_balance_mem"] == 0) {
+          if(load_balance_mem == 0) {
             buf_idx = 0;
           }
           send_buf[buf_idx] = rg_other_[send_idx];
@@ -1203,13 +1218,13 @@ zerork_status_t ZeroRKReactorManager::RedistributeResults()
             buf_idx += 1;
           }
 
-          if(int_options_["load_balance_mem"] == 0) {
+          if(load_balance_mem == 0) {
             MPI_Send(&send_buf[0], 6+num_species_, MPI_DOUBLE,
                      recv_rank, EXCHANGE_RETURN_TAG_,MPI_COMM_WORLD);
           }
           send_idx += 1;
         }
-        if(int_options_["load_balance_mem"] != 0) {
+        if(load_balance_mem != 0) {
           MPI_Send(&send_buf[0], (6+num_species_)*send_nreactors, MPI_DOUBLE,
                    recv_rank, EXCHANGE_RETURN_TAG_,MPI_COMM_WORLD);
         }
@@ -1230,7 +1245,7 @@ zerork_status_t ZeroRKReactorManager::RedistributeResults()
           int recv_nreactors = comm_mtx_reactors_[j];
           if(recv_nreactors > 0) {
             std::vector<double> recv_buf(6+num_species_);
-            if(int_options_["load_balance_mem"] != 0) {
+            if(load_balance_mem != 0) {
               recv_buf.resize((6+num_species_)*recv_nreactors);
               MPI_Recv(&recv_buf[0], (6+num_species_)*recv_nreactors, MPI_DOUBLE,
                        send_rank, EXCHANGE_RETURN_TAG_, MPI_COMM_WORLD,
@@ -1240,7 +1255,7 @@ zerork_status_t ZeroRKReactorManager::RedistributeResults()
             for(int k = 0; k < recv_nreactors; ++k) {
               recv_idx -= 1;
               size_t sorted_recv_idx = sorted_reactor_idxs_[recv_idx];
-              if(int_options_["load_balance_mem"] == 0) {
+              if(load_balance_mem == 0) {
                 MPI_Recv(&recv_buf[0], 6+num_species_, MPI_DOUBLE,
                          send_rank, EXCHANGE_RETURN_TAG_, MPI_COMM_WORLD,
                          &status);
@@ -1312,7 +1327,7 @@ void ZeroRKReactorManager::ProcessPerformance()
 
     MPI_Reduce(&n_steps_cpu_,&ri,1,MPI_INT,MPI_SUM,root_rank_,MPI_COMM_WORLD);
     if(rank_ == root_rank_) n_steps_cpu_ = ri;
-    MPI_Reduce(&n_steps_gpu_,&ri,1,MPI_DOUBLE,MPI_SUM,root_rank_,MPI_COMM_WORLD);
+    MPI_Reduce(&n_steps_gpu_,&ri,1,MPI_INT,MPI_SUM,root_rank_,MPI_COMM_WORLD);
     if(rank_ == root_rank_) n_steps_gpu_ = ri;
 
     //Get max time for cpu and gpu
@@ -1407,8 +1422,9 @@ void ZeroRKReactorManager::UpdateRankWeights() {
     if(int_options_["gpu"] != 0 && n_weight_updates_ % 10 == 0 && n_gpu_solve_ == 0) {
       double sum_weights = 0.0;
       std::vector<double> test_weights(nranks_,1.0);
+      const int initial_gpu_multiplier = int_options_["initial_gpu_multiplier"];
       for(int i = 0; i < nranks_; ++i) {
-        if(rank_has_gpu_[i]) test_weights[i] *= int_options_["initial_gpu_multiplier"];
+        if(rank_has_gpu_[i]) test_weights[i] *= initial_gpu_multiplier;
         sum_weights += test_weights[i];
       }
       double weight_factor = nranks_/sum_weights;
@@ -1420,10 +1436,11 @@ void ZeroRKReactorManager::UpdateRankWeights() {
       weight_factor = (n_cpu_solve_ + n_gpu_solve_)/sum_weights;
       bool override_weights = false;
       std::vector<int> reactors_wanted(nranks_);
+      const int n_reactors_min = int_options_["n_reactors_min"];
       for(int i = 0; i < nranks_; ++i) {
         reactors_wanted[i] = test_weights[i]*weight_factor;
         if(rank_has_gpu_[i] &&
-           reactors_wanted[i] > int_options_["n_reactors_min"] &&
+           reactors_wanted[i] > n_reactors_min &&
            test_weights[i] > rank_weights_[i]) {
           override_weights=true;
           break;

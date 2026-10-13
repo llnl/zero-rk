@@ -7,6 +7,8 @@
 #include "metis.h"
 #endif
 
+#include "heat_transfer_model.h"
+
 typedef struct
 {
   int concIdx;   // or denominator or column index
@@ -175,6 +177,9 @@ typedef struct
   double colPermTime,jacSetupTime,jacFactorTime,backsolveTime,funcTime;
 
   long int prevNumErrTestFails;
+
+  std::unique_ptr<zerork::HeatTransferModel> htxModel;
+  std::vector<double> multipliers;
 } cv_param;
 
 

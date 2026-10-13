@@ -31,6 +31,7 @@
 #include "flame_params.h"
 #include "cvode_functions.h"
 #include "set_initial_conditions.h"
+#include "restart_writer.h"
 
 using zerork::getHighResolutionTime;
 
@@ -47,14 +48,10 @@ static double FindMaximum(const size_t num_points,
                           const size_t f_stride,
                           const bool use_quadratic,
                           double *x_at_max);
-#ifdef ZERORK_MPI
-static void WriteFieldParallel(double t,
-			       const double state[],
-			       const FlameParams &params);
-#endif
-static void WriteFieldSerial(double t,
-			       const double state[],
-			       const FlameParams &params);
+
+static void WriteField(double t,
+		       const double state[],
+		       const FlameParams &params);
 
 static double GetMixtureMolecularMass(const int grid_id,
                                       const double t,
@@ -282,15 +279,9 @@ int main(int argc, char *argv[])
 
   // Write initial data file
   if (time_offset == 0.0) {
-#ifdef ZERORK_MPI
-    WriteFieldParallel(time_offset,
-		       &flame_state_ptr[0],
-		       flame_params);
-#else
-    WriteFieldSerial(time_offset,
-                     &flame_state_ptr[0],
-                     flame_params);
-#endif
+    WriteField(time_offset,
+	       &flame_state_ptr[0],
+	       flame_params);
   }
 
   // Report simulation info
@@ -325,7 +316,11 @@ int main(int argc, char *argv[])
     printf("# Column  4: [m] Flame thickness defined as T_burnt-T_unburnt\n"
 	   "#            divided by maximum temperature gradient\n");
     printf("# Column  5: [m] Flame thickness defined as (K/rhoCp)/SL\n");
-    printf("# Column  6: [m] location of the maximum temperature \n");
+    if(flame_params.simulation_type_ == 0) {
+      printf("# Column  6: [m] location of the maximum temperature jump (w.r.t. wall) \n");
+    } else {
+      printf("# Column  6: [m] location of the maximum temperature jump (w.r.t streamwise position)\n");
+    }
     printf("# Column  7: [#] number of steps taken by CVode\n");
     printf("# Column  8: [#] number of calls to the user's time derivative (RHS) function\n");
     printf("# Column  9: [#] number of calls to the linear solver setup function\n");
@@ -369,12 +364,15 @@ int main(int argc, char *argv[])
       ++num_prints;
 
       // Compute T-Twall
-      for(int j=0; j<num_local_points; ++j) {
+      for(int j=0; j<num_local_points-1; ++j) {
 	int jglobal = j + my_pe*num_local_points;
-        temperature_jump[j] =
-          (flame_state_ptr[(j+1)*num_states-1]-
-           flame_params.wall_temperature_[jglobal])*flame_params.ref_temperature_;
-
+	if(flame_params.simulation_type_ == 0) {
+          temperature_jump[j] =
+            (flame_state_ptr[(j+1)*num_states-1]-
+             flame_params.wall_temperature_[jglobal])*flame_params.ref_temperature_;
+	} else {
+          temperature_jump[j] = flame_state_ptr[(j+2)*num_states-1] - flame_state_ptr[(j+1)*num_states-1];
+	}
       }
       // Find maximum value over domain
       max_temperature_jump = FindMaximum(num_local_points,
@@ -433,15 +431,9 @@ int main(int argc, char *argv[])
 
       // Write data file
       if(num_prints % flame_params.parser_->field_dt_multiplier() == 0) {
-#ifdef ZERORK_MPI
-	WriteFieldParallel(current_time+time_offset,
-			   &flame_state_ptr[0],
-			   flame_params);
-#else
-        WriteFieldSerial(current_time+time_offset,
-                         &flame_state_ptr[0],
-                         flame_params);
-#endif
+	WriteField(current_time+time_offset,
+		   &flame_state_ptr[0],
+		   flame_params);
       }
 
 
@@ -524,174 +516,198 @@ static double FindMaximum(const size_t num_points,
 }
 
 // Write field to binary file for restart/postprocessing
-#ifdef ZERORK_MPI
-static void WriteFieldParallel(double t,
-			       const double state[],
-			       const FlameParams &params)
+static void WriteField(double t,
+		       const double state[],
+		       const FlameParams &params)
 {
   int num_grid_points = (int)params.z_.size();
   int num_grid_points_ext = (int)params.z_.size() + 1; // left BC
   int num_local_points = (int)params.num_local_points_;
   int num_reactor_states = params.reactor_->GetNumStates();
-  int my_pe, npes;
-  char filename[32], *basename;
+  int num_species = params.reactor_->GetNumSpecies();
+  int num_steps = params.reactor_->GetNumSteps();
+  int npes = params.npes_;
+  int my_pe = params.my_pe_;
+  bool dump_mole_fractions = params.parser_->write_mole_fractions_to_field_files();
+  bool dump_step_rates = params.parser_->write_step_rates_to_field_files();
 
-  int disp;
-  std::vector<double> buffer;
-  buffer.assign(num_local_points, 0.0);
+  int field_count = num_local_points;
+  if(my_pe == 0) field_count +=1; //left BC
 
-  MPI_File output_file;
-  MPI_Comm_rank(MPI_COMM_WORLD, &my_pe);
-  MPI_Comm_size(MPI_COMM_WORLD, &npes);
+  std::string filename = "data_" + std::to_string(t);
 
-  MPI_Datatype localarray;
-  int order = MPI_ORDER_C;
-  int gsize[1] = {num_grid_points};
-  int lsize[1] = {num_local_points};
-  int start[1] = {my_pe*num_local_points};
+  int num_vars = num_reactor_states;
+  if(dump_mole_fractions) num_vars += num_species;
+  if(dump_step_rates) num_vars += num_steps + num_species;
 
-  MPI_Type_create_subarray(1,gsize,lsize,start,
-			   order,MPI_DOUBLE,&localarray);
-  MPI_Type_commit(&localarray);
-
-  basename = "data_";
-  sprintf(filename, "%s%f", basename, t);
-
-  MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_CREATE | MPI_MODE_RDWR,
-		MPI_INFO_NULL, &output_file);
-
-  // Write header
-  if(my_pe == 0) {
-    MPI_File_write(output_file, &num_grid_points_ext, 1, MPI_INT, MPI_STATUS_IGNORE);//num points
-    MPI_File_write(output_file, &num_reactor_states, 1, MPI_INT, MPI_STATUS_IGNORE);//num variables
-    MPI_File_write(output_file, &t, 1, MPI_DOUBLE, MPI_STATUS_IGNORE); //time
+  // Collect state names
+  std::vector<std::string> state_names(num_vars);
+  for(int j=0; j<num_reactor_states; ++j) {
+    state_names[j] = params.reactor_->GetNameOfStateId(j);
+  }
+  int names_offset = num_reactor_states;
+  if(dump_mole_fractions) {
     for(int j=0; j<num_reactor_states; ++j) {
       std::string state_name = params.reactor_->GetNameOfStateId(j);
-      char buf[64];
-      strcpy(buf, state_name.c_str());
-      MPI_File_write(output_file, &buf, 64, MPI_CHAR, MPI_STATUS_IGNORE); //state name
-    }
-  }
-
-  // Write data for each variable
-  for(int j=0; j<num_reactor_states; ++j) {
-    // Left BC
-    if(j==num_reactor_states-1) {
-      buffer[0] = params.inlet_temperature_*params.ref_temperature_;
-    } else if(j==num_reactor_states-2) {
-      buffer[0] = params.inlet_relative_volume_;
-    } else {
-      buffer[0] = params.inlet_mass_fractions_[j];
-    }
-    disp = 2*sizeof(int) + sizeof(double) + num_reactor_states*sizeof(char)*64
-      + j*(npes*num_local_points+1)*sizeof(double);
-    MPI_File_set_view(output_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-    MPI_File_write_all(output_file, &buffer[0], 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
-
-    // Write interior data
-    for (int k=0; k<num_local_points; ++k) {
-      buffer[k] = state[k*num_reactor_states + j];
-      if(j==num_reactor_states-1){
-	buffer[k] *= params.ref_temperature_;
+      size_t found = state_name.find("MassFraction");
+      if(found != std::string::npos) {
+        state_name.replace(0, 4, "Mole");
+        state_names[names_offset+j] = state_name;
       }
     }
-    disp = 2*sizeof(int) + sizeof(double) + num_reactor_states*sizeof(char)*64
-      + sizeof(double)
-      + j*(npes*num_local_points+1)*sizeof(double);
-    MPI_File_set_view(output_file, disp, MPI_DOUBLE, localarray, "native", MPI_INFO_NULL);
-    MPI_File_write_all(output_file, &buffer[0], num_local_points, MPI_DOUBLE, MPI_STATUS_IGNORE);
+    names_offset += num_species;
   }
-  // Write mass flux
-  // Left BC
-  buffer[0] = params.mass_flux_[0];
-  disp = 2*sizeof(int) + sizeof(double) + num_reactor_states*sizeof(char)*64
-    + num_reactor_states*(npes*num_local_points+1)*sizeof(double);
-  MPI_File_set_view(output_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-  MPI_File_write_all(output_file, &buffer[0], 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
-
-  // Interior
-  for (int k=0; k<num_local_points; ++k) {
-    buffer[k] = params.mass_flux_[k];
+  if(dump_step_rates) {
+    for(int j=0; j<num_steps; ++j) {
+      std::string step_name;
+      params.reactor_->GetMechanism()->getReactionNameDirOfStep(j, &step_name);
+      state_names[names_offset+j] = step_name + " ROP";
+    }
+    names_offset += num_steps;
+    for(int j=0; j<num_species; ++j) {
+      std::string state_name = params.reactor_->GetNameOfStateId(j);
+      size_t found = state_name.find("MassFraction");
+      if(found != std::string::npos) {
+        state_name.replace(0, 12, "NetProductionRate");
+        state_names[names_offset+j] = state_name;
+      }
+    }
   }
-  disp = 2*sizeof(int) + sizeof(double) + num_reactor_states*sizeof(char)*64
-    + sizeof(double)
-    + num_reactor_states*(npes*num_local_points+1)*sizeof(double);
-  MPI_File_set_view(output_file, disp, MPI_DOUBLE, localarray, "native", MPI_INFO_NULL);
-  MPI_File_write_all(output_file, &buffer[0], num_local_points, MPI_DOUBLE, MPI_STATUS_IGNORE);
 
-  MPI_File_close(&output_file);
-
-  MPI_Type_free(&localarray);
-}
+  //Instantiate Writer
+#ifdef ZERORK_MPI
+  zerork::utilities::RestartWriter writer(filename, field_count, num_vars, t, state_names, MPI_COMM_WORLD);
+#else
+  zerork::utilities::RestartWriter writer(filename, field_count, num_vars, t, state_names);
 #endif
 
-static void WriteFieldSerial(double t,
-                             const double state[],
-                             const FlameParams &params)
-{
-  int num_grid_points = (int)params.z_.size();
-  int num_grid_points_ext = (int)params.z_.size() + 1; // left BC
-  int num_local_points = (int)params.num_local_points_;
-  int num_reactor_states = params.reactor_->GetNumStates();
-  char filename[32], *basename;
-
-  int disp;
-  std::vector<double> buffer;
-  buffer.assign(num_local_points, 0.0);
-
-  ofstream output_file;
-
-  basename = "data_";
-  sprintf(filename, "%s%f", basename, t);
-
-  output_file.open(filename, ios::binary | ios::out);
-
-  // Write header
-  output_file.write((char*)&num_grid_points_ext, sizeof(int));
-  output_file.write((char*)&num_reactor_states, sizeof(int));
-  output_file.write((char*)&t, sizeof(double));
-  for(int j=0; j<num_reactor_states; j++) {
-    std::string state_name = params.reactor_->GetNameOfStateId(j);
-    char buf[64];
-    strcpy(buf, state_name.c_str());
-    output_file.write((char*)&buf, 64*sizeof(char));
-  }
-
   // Write data for each variable
+  std::vector<double> buffer(field_count,0);
   for(int j=0; j<num_reactor_states; ++j) {
-    // Left BC
-    if(j==num_reactor_states-1) {
-      buffer[0] = params.inlet_temperature_*params.ref_temperature_;
-    } else if(j==num_reactor_states-2) {
-      buffer[0] = params.inlet_relative_volume_;
-    } else {
-      buffer[0] = params.inlet_mass_fractions_[j];
+    int offset = 0;
+    if(my_pe == 0) {
+      // Left BC
+      offset = 1;
+      if(j==num_reactor_states-1) {
+        buffer[0] = params.inlet_temperature_*params.ref_temperature_;
+      } else if(j==num_reactor_states-2) {
+        buffer[0] = params.inlet_relative_volume_;
+      } else {
+        buffer[0] = params.inlet_mass_fractions_[j];
+      }
     }
-    output_file.write((char*)&buffer[0], sizeof(double));
 
     // Interior data
     for (int k=0; k<num_local_points; ++k) {
-      buffer[k] = state[k*num_reactor_states + j];
+      buffer[k+offset] = state[k*num_reactor_states + j];
       if(j==num_reactor_states-1){
-	buffer[k] *= params.ref_temperature_;
+	buffer[k+offset] *= params.ref_temperature_;
       }
     }
-    output_file.write((char*)&buffer[0], num_local_points*sizeof(double));
+    writer.WriteField(buffer);
+  }
+
+  if(dump_mole_fractions) {
+    std::vector<double> inlet_mole_fractions(num_species);
+    std::vector<double> state_mole_fractions(num_species*num_local_points);
+    params.reactor_->GetMechanism()->getXfromY(&params.inlet_mass_fractions_[0],&inlet_mole_fractions[0]);
+    for (int k=0; k<num_local_points; ++k) {
+      params.reactor_->GetMechanism()->getXfromY(&state[k*num_reactor_states],&state_mole_fractions[k*num_species]);
+    }
+
+    for(int j=0; j<num_species; ++j) {
+      // Write left (fuel) BC data
+      int offset = 0;
+      if(my_pe == 0) {
+        offset+=1;
+        buffer[0] = inlet_mole_fractions[j];
+      }
+
+      // Write interior data
+      for (int k=0; k<num_local_points; ++k) {
+        buffer[k+offset] = state_mole_fractions[k*num_species + j];
+      }
+
+      writer.WriteField(buffer);
+    }
+  }
+
+  if(dump_step_rates) {
+    std::vector<double> creation_rates(num_steps);
+    std::vector<double> destruction_rates(num_steps);
+    std::vector<double> concentrations(num_species);
+
+    std::vector<double> inlet_step_rates(num_steps);
+    std::vector<double> inlet_net_rates(num_species);
+    double relative_volume = params.inlet_relative_volume_;
+    double density         = 1.0/relative_volume;
+    double temperature     = params.inlet_temperature_*params.ref_temperature_;
+    params.reactor_->GetMechanism()->getCfromVY(relative_volume,&params.inlet_mass_fractions_[0],&concentrations[0]);
+    params.reactor_->GetMechanism()->getReactionRates(temperature,&concentrations[0],
+		                                      &inlet_net_rates[0],
+		                                      &creation_rates[0],
+		                                      &destruction_rates[0],
+		                                      &inlet_step_rates[0]);
+
+    std::vector<double> state_step_rates(num_steps*num_local_points, 0.0);
+    std::vector<double> state_net_rates(num_species*num_local_points, 0.0);
+    for (int k=0; k<num_local_points; ++k) {
+      relative_volume = state[k*num_reactor_states+num_species];
+      density         = 1.0/relative_volume;
+      temperature     = state[k*num_reactor_states+num_species+1]*params.ref_temperature_;
+      params.reactor_->GetMechanism()->getCfromVY(relative_volume,&state[k*num_reactor_states],&concentrations[0]);
+      params.reactor_->GetMechanism()->getReactionRates(temperature,&concentrations[0],
+                                                        &state_net_rates[k*num_species],
+                                                        &creation_rates[0],
+                                                        &destruction_rates[0],
+                                                        &state_step_rates[k*num_steps]);
+    }
+
+    for(int j=0; j<num_steps; ++j) {
+      int offset = 0;
+      if(my_pe == 0) {
+        offset += 1;
+        buffer[0] = inlet_step_rates[j];
+      }
+
+      // Write interior data
+      for (int k=0; k<num_local_points; ++k) {
+        buffer[k+offset] = state_step_rates[k*num_steps + j];
+      }
+
+      writer.WriteField(buffer);
+    }
+
+    for(int j=0; j<num_species; ++j) {
+      int offset = 0;
+      if(my_pe == 0) {
+        offset += 1;
+        buffer[0] = inlet_net_rates[j];
+      }
+
+      // Write interior data
+      for (int k=0; k<num_local_points; ++k) {
+        buffer[k+offset] = state_net_rates[k*num_species + j];
+      }
+
+      writer.WriteField(buffer);
+    }
   }
 
   // Write mass flux
   // Left BC
-  buffer[0] = params.mass_flux_[0];
-  output_file.write((char*)&buffer[0], sizeof(double));
+  int offset = 0;
+  if(my_pe == 0) {
+    offset=1;
+    buffer[0] = params.mass_flux_[0];
+  }
+
   // Interior
   for (int k=0; k<num_local_points; ++k) {
-    buffer[k] = params.mass_flux_[k];
+    buffer[k+offset] = params.mass_flux_[k];
   }
-  output_file.write((char*)&buffer[0], num_local_points*sizeof(double));
-  output_file.close();
-
+  writer.WriteField(buffer);
 }
-
 
 static double GetMixtureMolecularMass(const int grid_id,
                                       const double t,

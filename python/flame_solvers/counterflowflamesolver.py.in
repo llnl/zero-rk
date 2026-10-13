@@ -15,7 +15,7 @@ if SCRIPT_LOCATION.endswith('.pyc') and os.path.exists(SCRIPT_LOCATION[:-1]):
 def read_grid(gridfile):
 
     grid = np.genfromtxt(gridfile, delimiter='')
-    num_points = len(grid)
+    num_points = len(grid) - 2
     length = grid[num_points-1] #assumes grid[0]=0
     return num_points, length
 
@@ -411,10 +411,12 @@ def compute_steady_counterflowflame(start_file,
 
         # Run steady solver
         f = open("log", "w")
+
+        ci_args = os.environ.get("ZERORK_CI_MPI_ARGS","").split()
         if(mpiexec == 'srun'):
-            sp.call(['srun', '-n', str(nprocs), '-N', str(nnodes), flameSolv, input_file], stdout=f)
+            sp.call(['srun', '-n', str(nprocs), '-N', str(nnodes), *ci_args, flameSolv, input_file], stdout=f)
         else: #mpirun, mpiexec
-            sp.call([mpiexec, '-n', str(nprocs), flameSolv, input_file], stdout=f)
+            sp.call([mpiexec, '-n', str(nprocs), *ci_args, flameSolv, input_file], stdout=f)
 
         # Get flame speed
         Tmax_new, lF_new, flame_loc = read_log_steady()
@@ -440,9 +442,9 @@ def compute_steady_counterflowflame(start_file,
             sp.call(['sed', '-i', 's/.*restart_file.*/restart_file: data_new/g', input_file])
             f = open("log", "w")
             if(mpiexec == 'srun'):
-                 sp.call(['srun', '-n', str(nprocs), '-N', str(nnodes), flameSolv, input_file], stdout=f)
+                 sp.call(['srun', '-n', str(nprocs), '-N', str(nnodes), *ci_args, flameSolv, input_file], stdout=f)
             else: #mpirun, mpiexec
-                sp.call([mpiexec, '-n', str(nprocs), flameSolv, input_file], stdout=f)
+                sp.call([mpiexec, '-n', str(nprocs), *ci_args, flameSolv, input_file], stdout=f)
             Tmax_new, lF_new, flame_loc = read_log_steady()
             if(Tmax_new == 0): #treat regrid fail differently?
                 print('Failed after regrid. TO DO: Recover from this!!')
@@ -611,10 +613,11 @@ def compute_unsteady_counterflowflame(input_file,
                     sp.call(['sed', '-i', 's/max_internal_dt.*/max_internal_dt: %s/g' % (max_dt_init,), input_file])
                     f = open("log", "w")
                     runid = 1
+                    ci_args = os.environ.get("ZERORK_CI_MPI_ARGS","").split()
                     if(mpiexec == 'srun'):
-                        sp.call(['srun', '-n', str(nprocs_init), '-N', str(nnodes_init), flameSolv, input_file], stdout=f)
+                        sp.call(['srun', '-n', str(nprocs_init), '-N', str(nnodes_init), *ci_args, flameSolv, input_file], stdout=f)
                     else: #mpirun, mpiexec
-                        sp.call([mpiexec, '-n', str(nprocs_init), flameSolv, input_file], stdout=f)
+                        sp.call([mpiexec, '-n', str(nprocs_init), *ci_args, flameSolv, input_file], stdout=f)
 
                     ## Get flame speed
                     Tmax_new, lF_new, flame_loc, error = read_log(mult)
@@ -669,9 +672,9 @@ def compute_unsteady_counterflowflame(input_file,
                             sp.call(['sed', '-i', 's/rel_tol.*/rel_tol: %s/g' % (rel_tol_steady,), input_file])
                             sp.call(['sed', '-i', 's/integrator_type.*/integrator_type: 3/g', input_file])
                             if(mpiexec == 'srun'):
-                                sp.call(['srun', '-n', str(nprocs_steady), '-N', str(nnodes_steady), steadySolv, input_file], stdout=f)
+                                sp.call(['srun', '-n', str(nprocs_steady), '-N', str(nnodes_steady), *ci_args, steadySolv, input_file], stdout=f)
                             else: #mpirun, mpiexec
-                                sp.call([mpiexec, '-n', str(nprocs_steady), steadySolv, input_file], stdout=f)
+                                sp.call([mpiexec, '-n', str(nprocs_steady), *ci_args, steadySolv, input_file], stdout=f)
                             Tmax_new, lF_new, flame_loc = read_log_steady()
                             if(Tmax_new == 0):
                                 print('Simulation failed')
@@ -683,9 +686,9 @@ def compute_unsteady_counterflowflame(input_file,
                         else:
                             runid += 1
                             if(mpiexec == 'srun'):
-                                sp.call(['srun', '-n', str(nprocs), '-N', str(nnodes), flameSolv, input_file], stdout=f)
+                                sp.call(['srun', '-n', str(nprocs), '-N', str(nnodes), *ci_args, flameSolv, input_file], stdout=f)
                             else: #mpirun, mpiexec
-                                sp.call([mpiexec, '-n', str(nprocs), flameSolv, input_file], stdout=f)
+                                sp.call([mpiexec, '-n', str(nprocs), *ci_args, flameSolv, input_file], stdout=f)
 
                             # Get flame speed
                             Tmax_new, lF_new, flame_loc, error = read_log(mult)

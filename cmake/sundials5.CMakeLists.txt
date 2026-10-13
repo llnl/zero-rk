@@ -7,9 +7,11 @@ ExternalProject_Add(
   sundials5
   URL        https://github.com/LLNL/sundials/archive/refs/tags/v5.8.0.tar.gz
   URL_HASH   MD5=a087032a72127c12e162bfe4405b03cd
+  PATCH_COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_LIST_DIR}/SundialsSetupCuda.cmake ${CMAKE_BINARY_DIR}/external/sundials5-build/sundials5-prefix/src/sundials5/cmake/SundialsSetupCuda.cmake
   LIST_SEPARATOR |
   CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${sundials_prefix}
              -DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES_EXT}
+             -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
              -DEXAMPLES_ENABLE_C=OFF
              -DEXAMPLES_ENABLE_CXX=OFF
              -DEXAMPLES_ENABLE_CUDA=OFF
@@ -25,6 +27,8 @@ ExternalProject_Add(
              -DENABLE_LAPACK=${ZERORK_ENABLE_SUNDIALS_LAPACK}
              -DLAPACK_LIBRARIES=""
              -DLAPACK_WORKS:BOOL=TRUE
+             -DSUNDIALS_F77_FUNC_CASE=LOWER
+             -DSUNDIALS_F77_FUNC_UNDERSCORES=ONE
              -DCMAKE_POSITION_INDEPENDENT_CODE=ON
              -DSUNDIALS_INDEX_SIZE=32
              ${MAGMA_ARGS}

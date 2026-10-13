@@ -11,6 +11,7 @@ oxidizer_composition: {}
 solution_time: 1.0
 print_dt: 1.0
 delta_temperature_ignition: 400.0
+constant_volume: 1
 
 temperature_min: 1450.0
 temperature_max: 1450.0

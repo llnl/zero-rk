@@ -2,15 +2,16 @@
 import os
 import time
 import shutil
-import pkg_resources
 import tempfile
 import subprocess
+import importlib_resources
 
 import numpy as np
 from ruamel.yaml import YAML
 
 from .opt_app import opt_app
 from ..config import ZERORK_ROOT
+from ..util.rmtree_retry import rmtree_retry
 
 yaml=YAML(typ="safe")
 yaml.default_flow_style=False #TODO: Yes/no?
@@ -20,11 +21,10 @@ ZERORK_MPI_EXE=os.getenv("ZERORK_MPI_EXE", default=os.path.join(ZERORK_ROOT,'bin
 
 
 class psr_opt(opt_app):
-    def __init__(self, full_mechanism=None, full_therm=None, save_full=None,
+    def __init__(self, full_mechanism=None, full_therm=None, full_trans=None, save_full=None,
                  comparison_file=None, input_file=None, exe=None, procs=1,
                  sim_time_weight=None):
         assert (full_mechanism is not None or comparison_file is not None), "Must supply either full_mechanism or comparison_file"
-        base_yaml_file = pkg_resources.resource_filename('zerork.rate_opt', 'data/psr_base.yml')
         self.curr_data = None
         self.curr_mass_fracs = None
         self.n_data = 0
@@ -39,14 +39,17 @@ class psr_opt(opt_app):
             assert(full_therm is not None), "Must supply full_therm with full_mechanism"
             self.full_mechanism = full_mechanism
             self.full_therm = full_therm
+            self.full_trans = full_trans
 
             self.comp_data = None
             self.comp_mass_fracs = None
             #Defer running full mechanism until all options set and we are "run"
             # in the optimization loop
         if input_file is None:
-            with open(base_yaml_file,'r') as yfile:
-                self.yaml = yaml.load(yfile)
+            base_yaml_ref = importlib_resources.files('zerork.rate_opt') / 'data' / 'psr_base.yml'
+            with importlib_resources.as_file(base_yaml_ref) as base_yaml_file:
+                with open(base_yaml_file,'r') as yfile:
+                    self.yaml = yaml.load(yfile)
         else:
             with open(input_file,'r') as yfile:
                 self.yaml = yaml.load(yfile)
@@ -85,12 +88,12 @@ class psr_opt(opt_app):
     def mean_absolute_relative_error(self):
         return np.sum(np.abs((self.curr_mass_fracs - self.comp_mass_fracs)/self.comp_mass_fracs))/(self.n_data*self.num_tracked_species)
 
-    def opt_fn(self, mech_file, therm_file):
+    def opt_fn(self, mech_file, therm_file, trans_file):
         if(self.comp_data is None):
-            self.comp_data, self.comp_mass_fracs = self.run(self.full_mechanism, self.full_therm, self.save_full)
+            self.comp_data, self.comp_mass_fracs = self.run(self.full_mechanism, self.full_therm, self.full_trans, self.save_full)
             self.n_data = self.comp_mass_fracs.size
             self.comp_mass_fracs = np.maximum(self.comp_mass_fracs, self.yaml['min_mass_frac']) 
-        self.curr_data, self.curr_mass_fracs = self.run(mech_file, therm_file)
+        self.curr_data, self.curr_mass_fracs = self.run(mech_file, therm_file, trans_file)
         assert(self.curr_mass_fracs.size == self.n_data)
         self.err = self.error_fn()
         if self.sim_time_weight is not None:
@@ -98,13 +101,14 @@ class psr_opt(opt_app):
             self.err += self.sim_time_weight*np.sum(self.curr_data[:,8])/self.n_data
         return self.err
 
-    def run(self, mech_file, therm_file, save_file=None):
+    def run(self, mech_file, therm_file, trans_file=None, save_file=None):
         tmpdir = tempfile.mkdtemp(dir='.') #TODO (where to put?)
         self.yaml['mechFile'] = mech_file
         self.yaml['thermFile'] = therm_file 
         idt_file = os.path.join(tmpdir,'zerork.dat')
         self.yaml['idtFile'] = idt_file
         self.yaml['logFile'] = os.path.join(tmpdir,'zerork.cklog')
+        self.yaml['thistFile'] = os.path.join(tmpdir,'zerork.thist')
         zerork_infile_name = os.path.join(tmpdir,'zerork.yml')
         self.write_yaml(zerork_infile_name)
         curr_data = None
@@ -147,7 +151,7 @@ class psr_opt(opt_app):
                 shutil.move(idt_file, save_file)
         finally:
             #Clean up
-            shutil.rmtree(tmpdir)
+            rmtree_retry(tmpdir)
 
         return curr_data, curr_mass_fracs
 

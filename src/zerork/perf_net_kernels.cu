@@ -147,6 +147,49 @@ void __global__ cuda_rxn_conc_mult_ni_mr
   }
 }
 
+template <int nReacsPerStep>
+void __global__ cuda_rxn_conc_mult_ni_corr_mr
+(
+    const int nReactors,
+    const int nSpc,
+    const int nStep,
+    const double ford_correction_k,
+    const double ford_correction_c0,
+    const int *reactantSpcIdxListUnwrapped_dev,
+    const double *rop_concentration_powers_dev,
+    const double *C_dev,
+    double *stepOut_dev
+)
+{
+  int tid = blockIdx.x*blockDim.x + threadIdx.x;
+  const int reactorid = tid / nStep;
+  const int stepid    = tid % nStep;
+  if(stepid < nStep && reactorid < nReactors)
+  {
+    double mult = 1.0;
+    double neg = 1.0;
+    for(int j = 0; j < nReacsPerStep; ++j)
+    {
+      const int currConcIdx = reactantSpcIdxListUnwrapped_dev[j*nStep+stepid]*nReactors + reactorid;
+      const double species_concentration = C_dev[currConcIdx];
+      const double power = rop_concentration_powers_dev[j*nStep+stepid];
+
+      const double kx = ford_correction_k;
+      const double x0 = ford_correction_c0;
+      const double x = log(max(1.0e-30,species_concentration));
+      const double sigmoid = 1/(1+exp(-kx*(x-x0)));
+      double correction = sigmoid + (1-sigmoid)*pow(fabs(species_concentration),1-power);
+
+      double val = pow(fabs(species_concentration),power)*correction;
+      if(species_concentration < 0) {
+        neg = -1.0;
+      }
+      mult *= val;
+    }
+    stepOut_dev[stepid*nReactors+reactorid] *= mult*neg;
+  }
+}
+
 void __global__ cuda_production_rates
 (
     const int nSpc,
@@ -250,6 +293,9 @@ void perf_net_cuda_step_limiter_mr(const int nReactors,
 
 void perf_net_cuda_rxn_conc_mult_mr(const int nReactors, const int nSpc,
         const int nStep, const int maxReactants,
+	const bool ford_correction_derivative,
+	const double ford_correction_k,
+	const double ford_correction_c0,
         const int *reactantSpcIdxListUnwrapped_dev,
         const double *rop_concentration_powers_dev,
         const double *C_dev,
@@ -308,49 +354,104 @@ void perf_net_cuda_rxn_conc_mult_mr(const int nReactors, const int nSpc,
           assert(false);
       }
     } else {
-      switch(maxReactants) {
-        case 1:
-          cuda_rxn_conc_mult_ni_mr<1><<< nBlocks, nThreads >>> (
-            nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
-            rop_concentration_powers_dev, C_dev, stepOut_dev);
-          break;
-        case 2:
-          cuda_rxn_conc_mult_ni_mr<2><<< nBlocks, nThreads >>> (
-            nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
-            rop_concentration_powers_dev, C_dev, stepOut_dev);
-          break;
-        case 3:
-          cuda_rxn_conc_mult_ni_mr<3><<< nBlocks, nThreads >>> (
-            nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
-            rop_concentration_powers_dev, C_dev, stepOut_dev);
-          break;
-        case 4:
-          cuda_rxn_conc_mult_ni_mr<4><<< nBlocks, nThreads >>> (
-            nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
-            rop_concentration_powers_dev, C_dev, stepOut_dev);
-          break;
-        case 5:
-          cuda_rxn_conc_mult_ni_mr<5><<< nBlocks, nThreads >>> (
-            nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
-            rop_concentration_powers_dev, C_dev, stepOut_dev);
-          break;
-        case 6:
-          cuda_rxn_conc_mult_ni_mr<6><<< nBlocks, nThreads >>> (
-            nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
-            rop_concentration_powers_dev, C_dev, stepOut_dev);
-          break;
-        case 7:
-          cuda_rxn_conc_mult_ni_mr<7><<< nBlocks, nThreads >>> (
-            nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
-            rop_concentration_powers_dev, C_dev, stepOut_dev);
-          break;
-        case 8:
-          cuda_rxn_conc_mult_ni_mr<8><<< nBlocks, nThreads >>> (
-            nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
-            rop_concentration_powers_dev, C_dev, stepOut_dev);
-          break;
-        default:
-          assert(false);
+      if(ford_correction_derivative) {
+        switch(maxReactants) {
+          case 1:
+            cuda_rxn_conc_mult_ni_corr_mr<1><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, ford_correction_k, ford_correction_c0,
+	      reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 2:
+            cuda_rxn_conc_mult_ni_corr_mr<2><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, ford_correction_k, ford_correction_c0,
+	      reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 3:
+            cuda_rxn_conc_mult_ni_corr_mr<3><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, ford_correction_k, ford_correction_c0,
+	      reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 4:
+            cuda_rxn_conc_mult_ni_corr_mr<4><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, ford_correction_k, ford_correction_c0,
+	      reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 5:
+            cuda_rxn_conc_mult_ni_corr_mr<5><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, ford_correction_k, ford_correction_c0,
+	      reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 6:
+            cuda_rxn_conc_mult_ni_corr_mr<6><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, ford_correction_k, ford_correction_c0,
+	      reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 7:
+            cuda_rxn_conc_mult_ni_corr_mr<7><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, ford_correction_k, ford_correction_c0,
+	      reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 8:
+            cuda_rxn_conc_mult_ni_corr_mr<8><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, ford_correction_k, ford_correction_c0,
+	      reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          default:
+            assert(false);
+        }
+      } else {
+        switch(maxReactants) {
+          case 1:
+            cuda_rxn_conc_mult_ni_mr<1><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 2:
+            cuda_rxn_conc_mult_ni_mr<2><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 3:
+            cuda_rxn_conc_mult_ni_mr<3><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 4:
+            cuda_rxn_conc_mult_ni_mr<4><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 5:
+            cuda_rxn_conc_mult_ni_mr<5><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 6:
+            cuda_rxn_conc_mult_ni_mr<6><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 7:
+            cuda_rxn_conc_mult_ni_mr<7><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          case 8:
+            cuda_rxn_conc_mult_ni_mr<8><<< nBlocks, nThreads >>> (
+              nReactors, nSpc, nStep, reactantSpcIdxListUnwrapped_dev,
+              rop_concentration_powers_dev, C_dev, stepOut_dev);
+            break;
+          default:
+            assert(false);
+        }
       }
     }
 #ifdef ZERORK_FULL_DEBUG

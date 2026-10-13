@@ -87,8 +87,8 @@ O2: 1.0
 #initial_comp.
 #Type: floating-point
 #Optional with default value of -1e+300
-initial_inlet_extent: 0.00034924996914343953
-thickness : 0.00001
+initial_inlet_extent: 0.005
+thickness : 0.0015
 
 
 #Maximum integration time [s]
@@ -180,3 +180,5 @@ inlet_temperature: 400.0
 #Type: floating-point
 #Optional with default value of 1
 inlet_phi: 1.0
+
+use_equilibrium_for_init: y

@@ -21,16 +21,21 @@ set(INPUT_FILES constVolumeWSR/hydrogen_TSweep.yml.in
   cfd_plugin_tester/run_gpu.sh.in
   rate_optimization/run.sh.in
   rate_optimization/optimize_rate_h2_simple.py.in
+  negative_rate_refitter/run.sh.in
   surrogate_optimizer/diesel/run.sh.in
   surrogate_optimizer/tprf/run.sh.in
-  surrogate_optimizer/idt_sweep/run.sh.in
   flame_api_tester/input.yml.in
   flame_api_tester/run.sh.in
+  mechanism_parser/hydrogen.yml.in
+  mechanism_parser/run.sh.in
   )
 
 if(ENABLE_MPI)
 get_filename_component(MPIEXEC_NAME ${MPIEXEC_EXECUTABLE} NAME)
 set(MPIEXEC_EXAMPLE_NUMPROCS ${MPIEXEC_MAX_NUMPROCS})
+if(${MPIEXEC_EXAMPLE_NUMPROCS} GREATER 32)
+  set(MPIEXEC_EXAMPLE_NUMPROCS 32)
+endif()
 set(MPIEXEC_EXAMPLE_NUMPROCS_SMALL ${MPIEXEC_MAX_NUMPROCS})
 if(${MPIEXEC_EXAMPLE_NUMPROCS_SMALL} GREATER 8)
   set(MPIEXEC_EXAMPLE_NUMPROCS_SMALL 8)
@@ -78,9 +83,10 @@ set(INPUT_FILES ${INPUT_FILES}
   perturbAFactorGSA/perturbAFactorGSA_example.yml.in
   perturbAFactorGSA/run.sh.in
   variable_volume_gsa/run.sh.in
-  flame_api_tester/run_parallel.sh.in)
+  flame_api_tester/run_parallel.sh.in
+  surrogate_optimizer/idt_sweep/run.sh.in)
 
-install(FILES run_parallel.sh DESTINATION share/zerork/examples)
+install(FILES parallel_examples.txt run_parallel.sh DESTINATION share/zerork/examples)
 install(FILES run_all.sh DESTINATION share/zerork/examples)
 endif(ENABLE_MPI)
 
@@ -95,4 +101,4 @@ install(DIRECTORY ${OUT_DIR} DESTINATION share/zerork/examples/${OUT_DIR_PARENT}
         REGEX "\.in$" EXCLUDE)
 endforeach()
 
-install(FILES run_serial.sh DESTINATION share/zerork/examples)
+install(FILES serial_examples.txt run_serial.sh DESTINATION share/zerork/examples)

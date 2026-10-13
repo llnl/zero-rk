@@ -39,10 +39,17 @@ if(${ZERORK_HAVE_MKL})
   target_include_directories(mkl INTERFACE "${ZERORK_MKLROOT}/include")
   #Below pulled from MKL Link Advisor 2018.0.
   if(WIN32)
+    set(MKL_LIBS_DIR lib)
+    if( NOT(EXISTS "${ZERORK_MKLROOT}/${MKL_LIBS_DIR}/mkl_core.lib") )
+      set(MKL_LIBS_DIR win-x64)
+      if( NOT(EXISTS "${ZERORK_MKLROOT}/${MKL_LIBS_DIR}/mkl_core.lib") )
+        message( FATAL_ERROR "MKLROOT set but can't find MKL libs." )
+      endif()
+    endif()
     target_link_libraries(mkl INTERFACE
-      "${ZERORK_MKLROOT}/lib/mkl_intel_lp64.lib"
-      "${ZERORK_MKLROOT}/lib/mkl_sequential.lib"
-      "${ZERORK_MKLROOT}/lib/mkl_core.lib")
+      "${ZERORK_MKLROOT}/${MKL_LIBS_DIR}/mkl_intel_lp64.lib"
+      "${ZERORK_MKLROOT}/${MKL_LIBS_DIR}/mkl_sequential.lib"
+      "${ZERORK_MKLROOT}/${MKL_LIBS_DIR}/mkl_core.lib")
   else()
     target_link_libraries(mkl INTERFACE
       -Wl,--start-group

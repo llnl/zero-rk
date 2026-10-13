@@ -22,6 +22,6 @@ install(FILES pyproject.toml MANIFEST.in DESTINATION share/zerork/python)
 install(CODE "MESSAGE(\"-- Installing: Making python environment ...\")")
 install(CODE "execute_process(COMMAND \"${Python3_EXECUTABLE}\" -m venv env
                               WORKING_DIRECTORY ${CMAKE_INSTALL_PREFIX}/share/zerork/python)")
-install(CODE "execute_process(COMMAND env/bin/pip install --upgrade pip .
+install(CODE "execute_process(COMMAND ${CMAKE_COMMAND} -E env PYTHONNOUSERSITE=1 env/bin/python -m pip install -I pip .
                               OUTPUT_FILE package_build.log
                               WORKING_DIRECTORY ${CMAKE_INSTALL_PREFIX}/share/zerork/python)")

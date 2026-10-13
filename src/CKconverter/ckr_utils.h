@@ -19,12 +19,11 @@
 
 using namespace std;
 
-#ifdef _WIN32
+#if defined(_WIN32) && !defined(__clang__)
 #define TYPENAME_KEYWORD
 #else
 #define TYPENAME_KEYWORD typename
 #endif
-
 
 namespace ckr {
 

@@ -47,6 +47,7 @@ function(zerork_add_gtests TESTNAME)
     gtest_discover_tests(${TESTNAME}
                          EXTRA_ARGS ${ZERORK_ADD_GTESTS_ARGUMENTS}
 			 WORKING_DIRECTORY $<TARGET_FILE_DIR:${TESTNAME}>
+			 DISCOVERY_TIMEOUT 30
                          PROPERTIES ENVIRONMENT "ZERORK_DATA_DIR=${ZERORK_DATA_DIR}")
 
     add_dependencies(tests_build ${TESTNAME})
@@ -78,5 +79,6 @@ function(zerork_add_test TESTNAME)
     add_dependencies(tests_build ${TESTNAME})
 endfunction()
 
+include(CTest)
 
 

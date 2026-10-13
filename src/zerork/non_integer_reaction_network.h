@@ -96,6 +96,9 @@ class NonIntegerReactionNetwork
   int GetJacobianPattern(int row_id[], 
                          int column_id[]);
 
+  bool GetFORDCorrectionDerivative() const;
+  double GetFORDCorrectionDecay() const;
+  double GetFORDCorrectionOffset() const;
  private:
 
   std::string GetReactionString(const ckr::Reaction &ckreader_reaction) const;
@@ -148,6 +151,10 @@ class NonIntegerReactionNetwork
   std::vector<int> process_concentration_id_;
   std::vector<int> process_jacobian_id_;
   std::vector<double> process_multiplier_;
+
+  bool ford_correction_derivative_;
+  double ford_correction_k_;
+  double ford_correction_c0_;
 };
 
 } // namespace zerork

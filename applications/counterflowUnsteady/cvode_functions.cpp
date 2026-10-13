@@ -250,26 +250,25 @@ int ConstPressureFlameLocal(long int nlocal,
     int jContBC = 0;
     if(params->flame_type_ == 0 || params->flame_type_ == 2) {
       // Find grid point closest to old stagnation point location
-      int jStart = -1;
+      int jStart = num_total_points-1;
       for(int j=0; j<num_total_points; j++) {
         if(params->z_[j] > params->stagnation_plane_) {
           jStart = j;
           break;
         }
       }
-      if(jStart == -1) jStart = num_total_points-1;
       jContBC = jStart;
-      for(int i=1; jStart+i < num_total_points || jStart >= i; i++) {
+      for(int i=1; jStart+i < num_total_points || jStart-i >= 0; i++) {
         if(jStart+i < num_total_points && sign(mbuf[jStart+i]) != sign(mbuf[jStart])) {
           jContBC = jStart + i;
           break;
-        } else if (jStart>=i && sign(mbuf[jStart-i]) != sign(mbuf[jStart-i+1])) {
-          jContBC = jStart-i+1;
+        } else if (jStart-i>=0 && sign(mbuf[jStart-i]) != sign(mbuf[jStart])) {
+          jContBC = jStart - i;
           break;
         }
       }
       if(jContBC == 0) {
-        assert(mbuf[jContBC] <=0);
+        assert(mbuf[0] <=0);
         params->stagnation_plane_ = params->z_[0] - mbuf[0]*params->dz_[0]/(mbuf[1]-mbuf[0]);
       } else {
         assert(mbuf[jContBC]*mbuf[jContBC-1] <=0 || mbuf[num_total_points-1] >=0); // test opposite sign

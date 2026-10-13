@@ -769,6 +769,7 @@ int ConstPressureFlameLocal(int nlocal,
         }
       }
     }
+    if(my_pe == 0) free(sbuf);
     MPI_Bcast(&params->strain_rate_, 1, MPI_DOUBLE, 0, comm);
 
   }

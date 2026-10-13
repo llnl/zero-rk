@@ -24,14 +24,6 @@ set(COMMON_SRCS utility_funcs.cpp
 
 
 if(ZERORK_ENABLE_SUNDIALS_LAPACK)
-  #In principle this should be somewhere higher up, but here is OK for now 
-  include(FortranCInterface)
-  FortranCInterface_HEADER(
-    blas_stubs.h
-    SYMBOLS DSCAL DCOPY DAXPY DGEMV
-            SSCAL SCOPY SAXPY SGEMV
-  )
-
   list(APPEND COMMON_SRCS interfaces/zrkmatrix/zrkmatrix_lapackdense.c)
 endif()
 

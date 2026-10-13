@@ -2,7 +2,9 @@
 #define SUPERLU_MANAGER_H
 
 #include <vector>
-#include "slu_ddefs.h"
+#include <memory> //std::unique_ptr
+
+struct slu_data;
 
 class superlu_manager
 {
@@ -44,14 +46,7 @@ class superlu_manager
   void setup_memory(int n, int nnz, const int* indexes, const int* sums,
                     const double* values);
 
-  SuperMatrix m_M;
-  SuperMatrix m_L;
-  SuperMatrix m_U;
-  SuperMatrix m_B;
-  SuperMatrix m_X;
-  superlu_options_t m_options;
-  SuperLUStat_t m_stats;
-  mem_usage_t m_mem_usage;
+  std::unique_ptr<slu_data> m_slu_container;
   char m_equed[1];
   std::vector<double> m_R;
   std::vector<double> m_C;
@@ -62,9 +57,6 @@ class superlu_manager
   bool m_factored;
   int m_last_factor_n;
   int m_last_factor_nnz;
-#if SUPERLU_MAJOR_VERSION > 4
-  GlobalLU_t m_Glu;
-#endif
 };
 
 

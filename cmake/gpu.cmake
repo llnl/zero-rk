@@ -5,7 +5,7 @@ if(${ENABLE_GPU})
   set(CMAKE_CUDA_HOST_COMPILER ${CMAKE_CXX_COMPILER})
   set(CMAKE_CUDA_STANDARD 14)
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-    set(CMAKE_CUDA_ARCHITECTURES 70)
+    set(CMAKE_CUDA_ARCHITECTURES 90)
   endif()
   enable_language(CUDA)
   #N.B. this is for configuring external projects that use CMAKE_CUDA_ARCHITECTURES
@@ -17,5 +17,7 @@ if(${ENABLE_GPU})
     include(cmake/magma.cmake)
     set(ZERORK_HAVE_MAGMA ON)
   endif()
+
+  option(ZERORK_HAVE_RMM_DEVICE_VECTOR "Toggle for RMM Device Vector in cfd_plugin" OFF)
 endif()
 

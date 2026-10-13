@@ -1,7 +1,7 @@
 
 from __future__ import print_function
 
-import pkg_resources
+import importlib_resources
 import numpy
 from .surrogate_mixture import TargetBase, RelativeErrorFn
 
@@ -16,8 +16,9 @@ class RON_NN_Target(TargetBase):
         self.dT_perturb = self.dT0*(1.0 + 1.0e-4)
         self.eps_T = self.dT_perturb - self.dT0
 
-        wb_file = pkg_resources.resource_filename('zerork.surrogate_optimizer', 'data/RON_nn_data.npz')
-        nn_data = numpy.load(wb_file)
+        wb_ref = importlib_resources.files('zerork.surrogate_optimizer') / 'data' / 'RON_nn_data.npz'
+        with importlib_resources.as_file(wb_ref) as wb_file:
+            nn_data = numpy.load(wb_file)
         self.l1_weights = nn_data['l1_weights']
         self.l1_biases  = nn_data['l1_biases']
         self.l2_weights = nn_data['l2_weights']
@@ -98,8 +99,9 @@ class MON_NN_Target(TargetBase):
         self.dT_perturb = self.dT0*(1.0 + 1.0e-4)
         self.eps_T = self.dT_perturb - self.dT0
 
-        wb_file = pkg_resources.resource_filename('zerork.surrogate_optimizer', 'data/MON_nn_data.npz')
-        nn_data = numpy.load(wb_file)
+        wb_ref = importlib_resources.files('zerork.surrogate_optimizer') / 'data' / 'MON_nn_data.npz'
+        with importlib_resources.as_file(wb_ref) as wb_file:
+            nn_data = numpy.load(wb_file)
         self.l1_weights = nn_data['l1_weights']
         self.l1_biases  = nn_data['l1_biases']
         self.l2_weights = nn_data['l2_weights']

@@ -11,6 +11,7 @@ ExternalProject_Add(
              -Denable_single=ON
              -Denable_complex=ON
              -Denable_complex16=ON
+             -DXSDK_ENABLE_Fortran=OFF
              -DCMAKE_INSTALL_PREFIX=${superlu_prefix}
              -DCMAKE_BUILD_TYPE=${ZERORK_EXTERNALS_BUILD_TYPE}
              -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
@@ -18,6 +19,7 @@ ExternalProject_Add(
              -DCMAKE_MSVC_RUNTIME_LIBRARY=${CMAKE_MSVC_RUNTIME_LIBRARY}
              -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
              -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+             -DCMAKE_SYSTEM_NAME=${CMAKE_SYSTEM_NAME}
              -DTPL_BLAS_LIBRARIES=dummy #not used for lib build
 )
 

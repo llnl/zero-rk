@@ -2,7 +2,7 @@
 #define REACTOR_NVECTOR_SERIAL_CUDA_H
 
 #include <thrust/host_vector.h>
-#include <thrust/device_vector.h>
+#include "interfaces/device_vector/device_vector.h"
 
 #include "interfaces/cuda_la_manager/cuda_la_manager.h"
 #include "interfaces/cublas_manager/cublas_manager.h"
@@ -94,10 +94,10 @@ class ReactorNVectorSerialCuda : public ReactorBase
   std::vector<double> tmp2_data_;
   std::vector<double> tmp3_data_;
 
-  thrust::device_vector<double> state_data_dev_;
-  thrust::device_vector<double> tmp1_data_dev_;
-  thrust::device_vector<double> tmp2_data_dev_;
-  thrust::device_vector<double> tmp3_data_dev_;
+  zerork::device_vector<double> state_data_dev_;
+  zerork::device_vector<double> tmp1_data_dev_;
+  zerork::device_vector<double> tmp2_data_dev_;
+  zerork::device_vector<double> tmp3_data_dev_;
   N_Vector state_;
   N_Vector tmp1_;
   N_Vector tmp2_;
@@ -120,28 +120,28 @@ class ReactorNVectorSerialCuda : public ReactorBase
   thrust::host_vector<double> creation_rates_;
   thrust::host_vector<double> destruction_rates_;
 
-  thrust::device_vector<double> inverse_densities_dev_;
-  thrust::device_vector<double> pressures_dev_;
-  thrust::device_vector<double> dpdts_dev_;
-  thrust::device_vector<double> initial_temperatures_dev_;
-  thrust::device_vector<double> initial_energies_dev_;
-  thrust::device_vector<double> mean_cx_mass_dev_;
-  thrust::device_vector<double> e_src_dev_;
-  thrust::device_vector<double> y_src_dev_;
+  zerork::device_vector<double> inverse_densities_dev_;
+  zerork::device_vector<double> pressures_dev_;
+  zerork::device_vector<double> dpdts_dev_;
+  zerork::device_vector<double> initial_temperatures_dev_;
+  zerork::device_vector<double> initial_energies_dev_;
+  zerork::device_vector<double> mean_cx_mass_dev_;
+  zerork::device_vector<double> e_src_dev_;
+  zerork::device_vector<double> y_src_dev_;
 
-  thrust::device_vector<double> mol_wt_dev_;
-  thrust::device_vector<double> inv_mol_wt_dev_;
-  thrust::device_vector<double> net_production_rates_dev_;
-  thrust::device_vector<double> energy_dev_;
-  thrust::device_vector<double> cx_mass_dev_;
-  thrust::device_vector<double> forward_rates_of_production_dev_;
-  thrust::device_vector<double> creation_rates_dev_;
-  thrust::device_vector<double> destruction_rates_dev_;
-  thrust::device_vector<double> concentrations_dev_;
-  thrust::device_vector<double> temperatures_dev_;
+  zerork::device_vector<double> mol_wt_dev_;
+  zerork::device_vector<double> inv_mol_wt_dev_;
+  zerork::device_vector<double> net_production_rates_dev_;
+  zerork::device_vector<double> energy_dev_;
+  zerork::device_vector<double> cx_mass_dev_;
+  zerork::device_vector<double> forward_rates_of_production_dev_;
+  zerork::device_vector<double> creation_rates_dev_;
+  zerork::device_vector<double> destruction_rates_dev_;
+  zerork::device_vector<double> concentrations_dev_;
+  zerork::device_vector<double> temperatures_dev_;
 
   thrust::host_vector<double> jacobian_data_;
-  thrust::device_vector<double> jacobian_data_dev_;
+  zerork::device_vector<double> jacobian_data_dev_;
   thrust::host_vector<int>* jacobian_row_sums_ptr_;
   thrust::host_vector<int> jacobian_row_sums_temperature_;
   thrust::host_vector<int> jacobian_row_sums_no_temperature_;
@@ -151,32 +151,32 @@ class ReactorNVectorSerialCuda : public ReactorBase
   thrust::host_vector<int>* jacobian_column_indexes_ptr_;
   thrust::host_vector<int> jacobian_column_indexes_temperature_;
   thrust::host_vector<int> jacobian_column_indexes_no_temperature_;
-  thrust::device_vector<int>* jacobian_row_sums_dev_ptr_;
-  thrust::device_vector<int> jacobian_row_sums_temperature_dev_;
-  thrust::device_vector<int> jacobian_row_sums_no_temperature_dev_;
-  thrust::device_vector<int>* jacobian_row_indexes_dev_ptr_;
-  thrust::device_vector<int> jacobian_row_indexes_temperature_dev_;
-  thrust::device_vector<int> jacobian_row_indexes_no_temperature_dev_;
-  thrust::device_vector<int>* jacobian_column_indexes_dev_ptr_;
-  thrust::device_vector<int> jacobian_column_indexes_temperature_dev_;
-  thrust::device_vector<int> jacobian_column_indexes_no_temperature_dev_;
+  zerork::device_vector<int>* jacobian_row_sums_dev_ptr_;
+  zerork::device_vector<int> jacobian_row_sums_temperature_dev_;
+  zerork::device_vector<int> jacobian_row_sums_no_temperature_dev_;
+  zerork::device_vector<int>* jacobian_row_indexes_dev_ptr_;
+  zerork::device_vector<int> jacobian_row_indexes_temperature_dev_;
+  zerork::device_vector<int> jacobian_row_indexes_no_temperature_dev_;
+  zerork::device_vector<int>* jacobian_column_indexes_dev_ptr_;
+  zerork::device_vector<int> jacobian_column_indexes_temperature_dev_;
+  zerork::device_vector<int> jacobian_column_indexes_no_temperature_dev_;
 
   thrust::host_vector<double> preconditioner_data_;
-  thrust::device_vector<double> preconditioner_data_dev_;
+  zerork::device_vector<double> preconditioner_data_dev_;
   thrust::host_vector<int> preconditioner_row_sums_;
   thrust::host_vector<int> preconditioner_column_indexes_;
-  thrust::device_vector<double>* unit_diagonal_dev_ptr_;
-  thrust::device_vector<double> unit_diagonal_temperature_dev_;
-  thrust::device_vector<double> unit_diagonal_no_temperature_dev_;
-  thrust::device_vector<int> preconditioner_row_sums_dev_;
-  thrust::device_vector<int> preconditioner_column_indexes_dev_;
+  zerork::device_vector<double>* unit_diagonal_dev_ptr_;
+  zerork::device_vector<double> unit_diagonal_temperature_dev_;
+  zerork::device_vector<double> unit_diagonal_no_temperature_dev_;
+  zerork::device_vector<int> preconditioner_row_sums_dev_;
+  zerork::device_vector<int> preconditioner_column_indexes_dev_;
 
   thrust::host_vector<double> dense_jacobian_;
   thrust::host_vector<double> dense_preconditioner_;
-  thrust::device_vector<double> dense_jacobian_dev_;
-  thrust::device_vector<double> dense_preconditioner_dev_;
-  thrust::device_vector<cuDoubleComplex> dense_preconditioner_dev_z_;
-  thrust::device_vector<cuDoubleComplex> complex_workspace_dev_;
+  zerork::device_vector<double> dense_jacobian_dev_;
+  zerork::device_vector<double> dense_preconditioner_dev_;
+  zerork::device_vector<cuDoubleComplex> dense_preconditioner_dev_z_;
+  zerork::device_vector<cuDoubleComplex> complex_workspace_dev_;
 
   // non-integer reaction network
   int num_noninteger_jacobian_nonzeros_;
@@ -185,33 +185,33 @@ class ReactorNVectorSerialCuda : public ReactorBase
   std::vector<int> noninteger_sparse_id_no_temperature_;
   // Only needed for GPU calculation of non-integer jacobian
   int num_noninteger_jacobian_terms_;
-  thrust::device_vector<int>* noninteger_term_id_dev_ptr_;
-  thrust::device_vector<int> noninteger_term_id_temperature_dev_;
-  thrust::device_vector<int> noninteger_term_id_no_temperature_dev_;
-  thrust::device_vector<int> noninteger_concentration_id_dev_;
-  thrust::device_vector<int> noninteger_step_id_dev_;
-  thrust::device_vector<double> noninteger_multiplier_dev_;
+  zerork::device_vector<int>* noninteger_term_id_dev_ptr_;
+  zerork::device_vector<int> noninteger_term_id_temperature_dev_;
+  zerork::device_vector<int> noninteger_term_id_no_temperature_dev_;
+  zerork::device_vector<int> noninteger_concentration_id_dev_;
+  zerork::device_vector<int> noninteger_step_id_dev_;
+  zerork::device_vector<double> noninteger_multiplier_dev_;
   // Only needed for CPU calculation of non-integer jacobian
   std::vector<double> noninteger_jacobian_;
   thrust::host_vector<double> jacobian_data_nonint_;
-  thrust::device_vector<double> jacobian_data_nonint_dev_;
+  zerork::device_vector<double> jacobian_data_nonint_dev_;
 
-  thrust::device_vector<int> destruction_terms_conc_indexes_dev_;
-  thrust::device_vector<int> destruction_terms_reac_indexes_dev_;
-  thrust::device_vector<int>* destruction_terms_sparse_indexes_dev_ptr_;
-  thrust::device_vector<int> destruction_terms_sparse_indexes_temperature_dev_;
-  thrust::device_vector<int> destruction_terms_sparse_indexes_no_temperature_dev_;
+  zerork::device_vector<int> destruction_terms_conc_indexes_dev_;
+  zerork::device_vector<int> destruction_terms_reac_indexes_dev_;
+  zerork::device_vector<int>* destruction_terms_sparse_indexes_dev_ptr_;
+  zerork::device_vector<int> destruction_terms_sparse_indexes_temperature_dev_;
+  zerork::device_vector<int> destruction_terms_sparse_indexes_no_temperature_dev_;
 
-  thrust::device_vector<int> creation_terms_conc_indexes_dev_;
-  thrust::device_vector<int> creation_terms_reac_indexes_dev_;
-  thrust::device_vector<int>* creation_terms_sparse_indexes_dev_ptr_;
-  thrust::device_vector<int> creation_terms_sparse_indexes_temperature_dev_;
-  thrust::device_vector<int> creation_terms_sparse_indexes_no_temperature_dev_;
+  zerork::device_vector<int> creation_terms_conc_indexes_dev_;
+  zerork::device_vector<int> creation_terms_reac_indexes_dev_;
+  zerork::device_vector<int>* creation_terms_sparse_indexes_dev_ptr_;
+  zerork::device_vector<int> creation_terms_sparse_indexes_temperature_dev_;
+  zerork::device_vector<int> creation_terms_sparse_indexes_no_temperature_dev_;
 
   void SetupSparseJacobianArrays();
   int SetupJacobianSparseDevice(realtype t, N_Vector y,N_Vector fy);
-  int SparseToDenseDevice(const thrust::device_vector<int>& row_idxs, const thrust::device_vector<int>& col_idxs,
-                          const thrust::device_vector<double>& vals, double* dense);
+  int SparseToDenseDevice(const zerork::device_vector<int>& row_idxs, const zerork::device_vector<int>& col_idxs,
+                          const zerork::device_vector<double>& vals, double* dense);
   int FormPreconditionerDevice(double gamma);
   int FactorPreconditioner();
   int AddConstantBlockDiagonal(int n, int nbatch, double constant, double* A_dev);
@@ -222,7 +222,7 @@ class ReactorNVectorSerialCuda : public ReactorBase
   int FormDenseComplexPreconditioner(int k, double alpha, double beta);
 
   std::vector<double> weights_;
-  thrust::device_vector<double> step_limiter_;
+  zerork::device_vector<double> step_limiter_;
 };
 
 #endif

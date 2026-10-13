@@ -164,7 +164,8 @@ TEST_F (MechanismTestFixture, Step01)
                                &step_rates[0]);
   EXPECT_TRUE(NearScalar(step_rates[0],-expected_rate)) << "Reaction 1 - forward step rate with one negative concentration";   
   // check to see if the reaction can be processed when the concentration
-  // is negative
+  // is negative, two or more negative concentrations should still have
+  // a negative ROP to force the negative species to zero
   concentrations[3] = -concentrations[3];
   mechanism_->getReactionRates(temperature, 
                                &concentrations[0],
@@ -172,7 +173,7 @@ TEST_F (MechanismTestFixture, Step01)
                                &creation_rates[0],
                                &destruction_rates[0],
                                &step_rates[0]);
-  EXPECT_TRUE(NearScalar(step_rates[0],expected_rate)) << "Reaction 1 - forward step rate with two negative concentrations";   
+  EXPECT_TRUE(NearScalar(step_rates[0],-expected_rate)) << "Reaction 1 - forward step rate with two negative concentrations";   
 }
 
 TEST_F (MechanismTestFixture, Step02)

@@ -2,7 +2,10 @@
 
 source "@CMAKE_INSTALL_PREFIX@/share/zerork/python/env/bin/activate"
 
-"@MPIEXEC_EXECUTABLE@" @MPIEXEC_NUMPROC_FLAG@ \
-  @MPIEXEC_EXAMPLE_NUMPROCS@ @MPIEXEC_PREFLAGS@ \
-  python3 @MPIEXEC_POSTFLAGS@ -u idt_sweep.py >& idt_sweep.stdout
+"@MPIEXEC_EXECUTABLE@" \
+  @MPIEXEC_NUMPROC_FLAG@ \
+  @MPIEXEC_EXAMPLE_NUMPROCS_SMALL@ @MPIEXEC_PREFLAGS@ \
+  ${CI_MPI_ARGS:+ "${CI_MPI_ARGS}"}	\
+  python3 @MPIEXEC_POSTFLAGS@ -u idt_sweep.py
+
 

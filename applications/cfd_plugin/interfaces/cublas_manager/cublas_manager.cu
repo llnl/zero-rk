@@ -5,7 +5,13 @@ template<typename T>
 cublas_manager<T>::cublas_manager() :
   n_(-1),
   num_batches_(-1),
-  factored_(false)
+  factored_(false),
+  info_dev_(),
+  tmp_dev_(),
+  matrix_inverse_dev_(),
+  matrix_inverse_pointers_dev_(),
+  matrix_pointers_dev_(),
+  tmp_pointers_dev_()
 {
   cublasCreate(&cublas_handle_);
 }
@@ -35,38 +41,32 @@ void cublas_manager<T>::AllocateDeviceMemory()
   cudaDeviceSynchronize();
   cuda_err_check(cudaGetLastError());
 
-  cuda_err_check(cudaMalloc((void**)&matrix_inverse_dev_,sizeof(T)*(n_*n_*num_batches_)));
-  cuda_err_check(cudaMalloc((void**)&matrix_inverse_pointers_dev_,sizeof(T*)*num_batches_));
-  cuda_err_check(cudaMalloc((void**)&matrix_pointers_dev_,sizeof(T*)*num_batches_));
-  cuda_err_check(cudaMalloc((void**)&info_dev_,sizeof(int)*num_batches_));
-  cuda_err_check(cudaMalloc((void**)&tmp_dev_,sizeof(T)*num_batches_*n_));
-  cuda_err_check(cudaMalloc((void**)&tmp_pointers_dev_,sizeof(T*)*num_batches_));
+  matrix_inverse_dev_.resize(n_*n_*num_batches_);
+  matrix_inverse_pointers_dev_.resize(num_batches_);
+  matrix_pointers_dev_.resize(num_batches_);
+  info_dev_.resize(num_batches_);
+  tmp_dev_.resize(num_batches_*n_);
+  tmp_pointers_dev_.resize(num_batches_);
 
   data_ptrs_.resize(num_batches_);
   tmp_ptrs_.resize(num_batches_);
 
   for(int j = 0; j < num_batches_; ++j) {
-    data_ptrs_[j] = matrix_inverse_dev_ + j*n_*n_;
+    data_ptrs_[j] = thrust::raw_pointer_cast(matrix_inverse_dev_.data()) + j*n_*n_;
   }
-  cudaMemcpy(matrix_inverse_pointers_dev_, data_ptrs_.data(), sizeof(T*)*num_batches_, cudaMemcpyHostToDevice);
+  cudaMemcpy(thrust::raw_pointer_cast(matrix_inverse_pointers_dev_.data()), data_ptrs_.data(), sizeof(T*)*num_batches_, cudaMemcpyHostToDevice);
   cuda_err_check(cudaGetLastError());
 
   for(int j = 0; j < num_batches_; ++j) {
-    tmp_ptrs_[j] = tmp_dev_ + j*n_;
+    tmp_ptrs_[j] = thrust::raw_pointer_cast(tmp_dev_.data()) + j*n_;
   }
-  cudaMemcpy(tmp_pointers_dev_, tmp_ptrs_.data(), sizeof(T*)*num_batches_, cudaMemcpyHostToDevice);
+  cudaMemcpy(thrust::raw_pointer_cast(tmp_pointers_dev_.data()), tmp_ptrs_.data(), sizeof(T*)*num_batches_, cudaMemcpyHostToDevice);
   cuda_err_check(cudaGetLastError());
 }
 
 template<typename T>
 void cublas_manager<T>::FreeDeviceMemory()
 {
-  cudaFree(matrix_inverse_dev_);
-  cudaFree(matrix_inverse_pointers_dev_);
-  cudaFree(matrix_pointers_dev_);
-  cudaFree(info_dev_);
-  cudaFree(tmp_dev_);
-  cudaFree(tmp_pointers_dev_);
 }
 
 template<>
@@ -74,8 +74,8 @@ void cublas_manager<double>::getrf_batched() {
   int lda = n_;
   int* ipiv = NULL; //Turns off pivoting
   cublasDgetrfBatched(cublas_handle_, n_,
-                      matrix_pointers_dev_, lda,
-                      ipiv, info_dev_, num_batches_);
+                      thrust::raw_pointer_cast(matrix_pointers_dev_.data()), lda,
+                      ipiv, thrust::raw_pointer_cast(info_dev_.data()), num_batches_);
 }
 
 template<>
@@ -83,19 +83,20 @@ void cublas_manager<double>::getri_batched() {
   int lda = n_;
   int* ipiv = NULL; //Turns off pivoting
   int ldc = n_;
-  const double** const_matrix_pointers_dev = (const double**) matrix_pointers_dev_;
+  double* const* const_matrix_pointers_dev = (double* const*) thrust::raw_pointer_cast(matrix_pointers_dev_.data());
   cublasDgetriBatched(cublas_handle_, n_, const_matrix_pointers_dev,
-                      lda, ipiv, matrix_inverse_pointers_dev_,
-                      ldc, info_dev_, num_batches_);
+                      lda, ipiv, thrust::raw_pointer_cast(matrix_inverse_pointers_dev_.data()),
+                      ldc, thrust::raw_pointer_cast(info_dev_.data()), num_batches_);
 }
 
 template<>
 void cublas_manager<cuDoubleComplex>::getrf_batched() {
   int lda = n_;
   int* ipiv = NULL; //Turns off pivoting
+  cuDoubleComplex* const* const_matrix_pointers_dev = (cuDoubleComplex* const*) thrust::raw_pointer_cast(matrix_pointers_dev_.data());
   cublasZgetrfBatched(cublas_handle_, n_,
-                      matrix_pointers_dev_, lda,
-                      ipiv, info_dev_, num_batches_);
+                      const_matrix_pointers_dev, lda,
+                      ipiv, thrust::raw_pointer_cast(info_dev_.data()), num_batches_);
 }
 
 template<>
@@ -103,10 +104,11 @@ void cublas_manager<cuDoubleComplex>::getri_batched() {
   int lda = n_;
   int* ipiv = NULL; //Turns off pivoting
   int ldc = n_;
-  const cuDoubleComplex** const_matrix_pointers_dev = (const cuDoubleComplex**) matrix_pointers_dev_;
+  cuDoubleComplex* const* const_matrix_pointers_dev = (cuDoubleComplex* const*) thrust::raw_pointer_cast(matrix_pointers_dev_.data());
+  cuDoubleComplex* const* const_matrix_inverse_pointers_dev = (cuDoubleComplex* const*) thrust::raw_pointer_cast(matrix_inverse_pointers_dev_.data());
   cublasZgetriBatched(cublas_handle_, n_, const_matrix_pointers_dev,
-                      lda, ipiv, matrix_inverse_pointers_dev_,
-                      ldc, info_dev_, num_batches_);
+                      lda, ipiv, const_matrix_inverse_pointers_dev,
+                      ldc, thrust::raw_pointer_cast(info_dev_.data()), num_batches_);
 }
 
 
@@ -129,7 +131,7 @@ int cublas_manager<T>::factor_invert(int num_batches, int n, T* values) {
     }
   }
   if(need_tx) {
-    cudaMemcpy(matrix_pointers_dev_, data_ptrs_.data(), sizeof(T*)*num_batches_, cudaMemcpyHostToDevice);
+    cudaMemcpy(thrust::raw_pointer_cast(matrix_pointers_dev_.data()), data_ptrs_.data(), sizeof(T*)*num_batches_, cudaMemcpyHostToDevice);
   }
 
   getrf_batched();
@@ -138,7 +140,7 @@ int cublas_manager<T>::factor_invert(int num_batches, int n, T* values) {
   int ierr = 0;
 #ifdef ZERORK_FULL_DEBUG
   info_.resize(num_batches_);
-  cuda_err_check(cudaMemcpy(info_.data(), info_dev_, num_batches_*sizeof(int), cudaMemcpyDeviceToHost));
+  cuda_err_check(cudaMemcpy(info_.data(), thrust::raw_pointer_cast(info_dev_.data()), num_batches_*sizeof(int), cudaMemcpyDeviceToHost));
   //Check for errors
   // factor_error > 0, singular matrix, zero diagonal at row,col = factor_error
   // factor_error = 0, success
@@ -174,7 +176,7 @@ int cublas_manager<T>::factor_lu(int num_batches, int n, T* values) {
     }
   }
   if(need_tx) {
-    cudaMemcpy(matrix_pointers_dev_, data_ptrs_.data(), sizeof(T*)*num_batches_, cudaMemcpyHostToDevice);
+    cudaMemcpy(thrust::raw_pointer_cast(matrix_pointers_dev_.data()), data_ptrs_.data(), sizeof(T*)*num_batches_, cudaMemcpyHostToDevice);
   }
 
   getrf_batched();
@@ -182,7 +184,7 @@ int cublas_manager<T>::factor_lu(int num_batches, int n, T* values) {
   int ierr = 0;
 #ifdef ZERORK_FULL_DEBUG
   info_.resize(num_batches_);
-  cuda_err_check(cudaMemcpy(info_.data(), info_dev_, num_batches_*sizeof(int), cudaMemcpyDeviceToHost));
+  cuda_err_check(cudaMemcpy(info_.data(), thrust::raw_pointer_cast(info_dev_.data()), num_batches_*sizeof(int), cudaMemcpyDeviceToHost));
   //Check for errors
   // factor_error > 0, singular matrix, zero diagonal at row,col = factor_error
   // factor_error = 0, success
@@ -327,10 +329,10 @@ int cublas_manager<T>::solve_invert(int num_batches, int n, const T* rhs, T* sol
   this->cuda_transpose(soln,rhs,num_batches_,n_);
 
   // Block-diagonal matrix vector multiplication
-  this->cuda_bdmv(n_, num_batches_, matrix_inverse_dev_, soln, tmp_dev_);
+  this->cuda_bdmv(n_, num_batches_, thrust::raw_pointer_cast(matrix_inverse_dev_.data()), soln, thrust::raw_pointer_cast(tmp_dev_.data()));
 
   // Put tmp back into block order
-  this->cuda_transpose(soln,tmp_dev_,n_,num_batches_);
+  this->cuda_transpose(soln,thrust::raw_pointer_cast(tmp_dev_.data()),n_,num_batches_);
 
   return(0);
 }
@@ -341,9 +343,10 @@ void cublas_manager<double>::getrs_batched() {
   int lda = n_;
   int ldb = n_;
   int info = 0;
+  double* const* const_matrix_pointers_dev = (double* const*) thrust::raw_pointer_cast(matrix_pointers_dev_.data());
   cublasDgetrsBatched(cublas_handle_, CUBLAS_OP_N, n_, 1,
-                      matrix_pointers_dev_, lda,
-                      ipiv, tmp_pointers_dev_, ldb, &info, num_batches_);
+                      const_matrix_pointers_dev, lda,
+                      ipiv, thrust::raw_pointer_cast(tmp_pointers_dev_.data()), ldb, &info, num_batches_);
 }
 
 template<>
@@ -352,9 +355,11 @@ void cublas_manager<cuDoubleComplex>::getrs_batched() {
   int lda = n_;
   int ldb = n_;
   int info = 0;
+  cuDoubleComplex* const* const_matrix_pointers_dev = (cuDoubleComplex* const*) thrust::raw_pointer_cast(matrix_pointers_dev_.data());
+  cuDoubleComplex* const* const_tmp_pointers_dev = (cuDoubleComplex* const*) thrust::raw_pointer_cast(tmp_pointers_dev_.data());
   cublasZgetrsBatched(cublas_handle_, CUBLAS_OP_N, n_, 1,
-                      matrix_pointers_dev_, lda,
-                      ipiv, tmp_pointers_dev_, ldb, &info, num_batches_);
+                      const_matrix_pointers_dev, lda,
+                      ipiv, const_tmp_pointers_dev, ldb, &info, num_batches_);
 }
 
 template<typename T>
@@ -364,13 +369,13 @@ int cublas_manager<T>::solve_lu(int num_batches, int n, const T* rhs, T* soln) {
   }
 
   // Transpose rhs into tmp_dev_
-  this->cuda_transpose(tmp_dev_,rhs,num_batches_,n_);
+  this->cuda_transpose(thrust::raw_pointer_cast(tmp_dev_.data()),rhs,num_batches_,n_);
 
   // CUBLAS forward and back substitution
   getrs_batched();
 
   // Put tmp back into block order
-  this->cuda_transpose(soln,tmp_dev_,n_,num_batches_);
+  this->cuda_transpose(soln,thrust::raw_pointer_cast(tmp_dev_.data()),n_,num_batches_);
 
   return(0);
 }

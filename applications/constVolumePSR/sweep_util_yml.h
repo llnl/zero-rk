@@ -28,6 +28,7 @@ class idt_sweep_params : public idt_sweep_IFP
   void setInitialComp(const double phi, const double egr);
   void printInitialMoleComp() const;
   void incrementRunId();
+  void resetRunId();
 
   double getInitTemp()  const {return initTemp[tempId];}
   double getInitPres()  const {return initPres[presId];}
@@ -74,7 +75,6 @@ class idt_sweep_params : public idt_sweep_IFP
   const char * getMechFileName()     const {return this->mechFile().c_str();}
   const char * getThermFileName()    const {return this->thermFile().c_str();}
   const char * getLogFileName()      const {return this->logFile().c_str();}
-  double getVolume()    const {return volume;}
   double getPressureCoefficient() const {return Kpressure;}
 
   bool getILU()         const {return doILU;}
@@ -88,6 +88,8 @@ class idt_sweep_params : public idt_sweep_IFP
   int longOutput()         const {return this->long_output();}
   int energyEnabled()  const {return isEnergyEnabled;}
   int dumpJacobian() const {return doDumpJacobian;}
+  bool extinctionCurveSweep() const { return runTotal == residenceTimes.size(); }
+
   int printNetProductionRates() const {return printNetProdRates;}
   int printNetRatesOfProgress() const {return printNetROP;}
 

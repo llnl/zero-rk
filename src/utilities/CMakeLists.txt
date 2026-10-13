@@ -17,6 +17,8 @@ install(TARGETS zerorkutilities
     ARCHIVE DESTINATION lib
     PUBLIC_HEADER DESTINATION include/utilities)
 
+add_library(zerork_restart_writer INTERFACE)
+target_include_directories(zerork_restart_writer INTERFACE .)
 
 if(ENABLE_MPI)
 add_mpi_library(zerorkmpiutilities mpi_utilities.cpp)

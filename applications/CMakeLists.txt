@@ -1,6 +1,7 @@
 
 add_subdirectory(thermo_check)
 
+add_subdirectory(mechanism_parser)
 add_subdirectory(constVolumeWSR)
 add_subdirectory(perturbAFactor)
 add_subdirectory(perturbAFactorGSA)
@@ -10,6 +11,7 @@ add_subdirectory(variable_volume_batch)
 add_subdirectory(variable_volume_gsa)
 add_subdirectory(constVolumePSR)
 add_subdirectory(constVolumeWSR_TLA)
+add_subdirectory(constPressurePaSR)
 
 add_subdirectory(premixedSteady)
 add_subdirectory(premixedUnsteady)

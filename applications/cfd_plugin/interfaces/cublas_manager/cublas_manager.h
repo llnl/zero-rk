@@ -7,6 +7,8 @@
 
 #include "../cuda_la_manager/cuda_la_manager.h"
 
+#include "../device_vector/device_vector.h"
+
 template<typename T>
 class cublas_manager : public cuda_la_manager<T>
 {
@@ -42,12 +44,12 @@ class cublas_manager : public cuda_la_manager<T>
   std::vector<int> info_;
 
   //device pointers
-  int* info_dev_;
-  T* tmp_dev_;
-  T* matrix_inverse_dev_;
-  T** matrix_inverse_pointers_dev_;
-  T** matrix_pointers_dev_;
-  T** tmp_pointers_dev_;
+  zerork::device_vector<int> info_dev_;
+  zerork::device_vector<T> tmp_dev_;
+  zerork::device_vector<T> matrix_inverse_dev_;
+  zerork::device_vector<T*> matrix_inverse_pointers_dev_;
+  zerork::device_vector<T*> matrix_pointers_dev_;
+  zerork::device_vector<T*> tmp_pointers_dev_;
 
   cublasHandle_t cublas_handle_;
   cudaError_t cudaStatus_;

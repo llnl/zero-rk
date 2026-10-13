@@ -2,13 +2,23 @@
 #define SUPERLU_MANAGER_Z_H
 
 #include <vector>
-#include "slu_zdefs.h"
+#include <memory>
+
+#include "slu_dcomplex.h"
+
+struct slu_data;
 
 class superlu_manager_z
 {
  public:
   superlu_manager_z();
   virtual ~superlu_manager_z();
+
+  superlu_manager_z(superlu_manager_z&& other) noexcept;
+  superlu_manager_z& operator=(superlu_manager_z&& other) noexcept;
+
+  superlu_manager_z(const superlu_manager_z&) = delete;
+  superlu_manager_z& operator=(const superlu_manager_z&) = delete;
 
   enum matrix_t { CSC, CSR };
   int factor(const std::vector<int>& indexs, const std::vector<int>& sums,
@@ -26,14 +36,7 @@ class superlu_manager_z
   void setup_memory(int n, int nnz, const int* indexs, const int* sums,
                     const doublecomplex* values);
 
-  SuperMatrix m_M;
-  SuperMatrix m_L;
-  SuperMatrix m_U;
-  SuperMatrix m_B;
-  SuperMatrix m_X;
-  superlu_options_t m_options;
-  SuperLUStat_t m_stats;
-  mem_usage_t m_mem_usage;
+  std::unique_ptr<slu_data> m_slu_container;
   char m_equed[1];
   std::vector<double> m_R;
   std::vector<double> m_C;
@@ -44,9 +47,6 @@ class superlu_manager_z
   bool m_factored;
   int m_last_factor_n;
   int m_last_factor_nnz;
-#if SUPERLU_MAJOR_VERSION == 5
-  GlobalLU_t m_Glu;
-#endif
 };
 
 

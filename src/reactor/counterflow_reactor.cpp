@@ -787,12 +787,14 @@ int CounterflowReactor::Impl::BuildSparseJacobianArrays()
   // d(rhs mdot)/dU
   dense_id = num_species + (num_species+2)*num_states;
   dense_to_sparse_map[dense_id] = 1;
-  // d(rhs U)/dP
-  dense_id = num_species+2 + (num_species+3)*num_states;
-  dense_to_sparse_map[dense_id] = 1;
-  // d(rhs P)/dU (only at last grid point)
-  dense_id = num_species+3 + (num_species+2)*num_states;
-  dense_to_sparse_map[dense_id] = 1;
+  if(finite_separation_) {
+    // d(rhs U)/dP
+    dense_id = num_species+2 + (num_species+3)*num_states;
+    dense_to_sparse_map[dense_id] = 1;
+    // d(rhs P)/dU (only at last grid point)
+    dense_id = num_species+3 + (num_species+2)*num_states;
+    dense_to_sparse_map[dense_id] = 1;
+  }
 
   // add the diagonal for all states
   for(int j=0; j<num_states; ++j) {
@@ -1381,11 +1383,13 @@ ReactorError
   if(Tfix)
     jacobian[jacobian_column_sum_[num_species+2]+2] = -ref_momentum/relative_volume;
 
-  // PStrain column
-  // d(rhs U)/dP
-  jacobian[jacobian_column_sum_[num_species+3]] = -relative_volume;
-  // d(rhs P)/dP
-  //jacobian[jacobian_column_sum_[num_species+3]+1] = 0.0;
+  if(finite_separation_) {
+    // PStrain column
+    // d(rhs U)/dP
+    jacobian[jacobian_column_sum_[num_species+3]] = -relative_volume;
+    // d(rhs P)/dP
+    //jacobian[jacobian_column_sum_[num_species+3]+1] = 0.0;
+  }
   /**/
 
  return NONE;

@@ -1,3 +1,4 @@
+#include <cassert>
 #include "cusolver_rf_manager.h"
 #include "../../cuda_err_check.h"
 

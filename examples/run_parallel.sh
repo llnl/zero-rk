@@ -1,22 +1,8 @@
 
 examples_dir=$PWD
+ret_status=0
 
-for d in \
-  perturbAFactorGSA \
-  variable_volume_gsa \
-  premixed_steady_flame_solver \
-  premixed_unsteady_flame_solver \
-  diffusion_steady_flame_solver \
-  diffusion_unsteady_flame_solver \
-  counterflow_steady_flame_solver \
-  counterflow_unsteady_flame_solver \
-  flame_speed/steady \
-  flame_speed/unsteady \
-  counterflow_flame_sweeps/diffusion_steady \
-  counterflow_flame_sweeps/diffusion_unsteady \
-  counterflow_flame_sweeps/premixed_steady \
-  counterflow_flame_sweeps/premixed_unsteady \
-  surrogate_optimizer/idt_sweep
+for d in `grep -v '^#' parallel_examples.txt`
 do
   cd $d
   echo "Running test $d ..."
@@ -28,7 +14,10 @@ do
     echo "   Example: $d failed.     "
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     echo ""
+    ret_status=1
   fi
   cd $examples_dir
 done
+
+exit $ret_status
 

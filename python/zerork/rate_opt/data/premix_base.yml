@@ -1,0 +1,41 @@
+mech_file: chem.inp
+therm_file: therm.dat
+trans_file: trans.dat
+transport_model: 'ConstantLewis'
+inlet_fuel_comp: { O2: 1.0 }
+inlet_oxidizer_comp: { N2: 0.79, O2: 0.21, }
+inlet_full_comp: {}
+track_max: []
+initial_comp: { N2: 0.79, O2: 0.21, }
+
+#Overwritten by flamesolver driver
+length: 0.015
+initial_inlet_extent: 0.005
+pressure: 101325.0
+inlet_temperature: 300
+inlet_phi: 1.0
+Lewis_file: Lewis_file
+grid_file: grid_file
+restart_file: data_new
+convective_scheme_type: 2
+step_limiter : 1e+300
+simulation_type : 1
+ignition_temperature : 3200
+max_time: 0.002459115085349798
+stats_dt: 2e-06
+field_dt_multiplier: 55
+inlet_velocity: 0.41166172
+nusselt: 0.0
+store_jacobian: y
+num_off_diagonals: 0
+max_internal_dt: 1.0e-6
+max_steps: 10000
+max_subiter: 10
+num_points: 64
+rel_tol: 1e-08
+abs_tol: 1.0e-20
+ref_temperature: 1000.0
+use_equilibrium_for_init: y
+write_step_rates_to_field_files: n
+write_mole_fractions_to_field_files: n
+pseudo_unsteady: y

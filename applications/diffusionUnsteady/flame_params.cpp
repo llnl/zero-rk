@@ -710,6 +710,7 @@ void FlameParams::SetMemory()
 
   // Flag to include soot source terms
   soot_ = parser_->soot();
+  Y_sootmax = 0.0;
   if(soot_) {printf("# WARNING: Including PAH/density correction source terms.\n");}
 
   // Compute dissipation rate

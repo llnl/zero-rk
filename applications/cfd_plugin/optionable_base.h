@@ -2,7 +2,7 @@
 #define OPTIONABLE_BASE_H
 
 #include <string>
-#include <map>
+#include <unordered_map>
 
 typedef enum _optionable_status_t {
   OPTIONABLE_STATUS_SUCCESS = 0,
@@ -15,9 +15,9 @@ class OptionableBase
   OptionableBase() {};
   virtual ~OptionableBase() {};
 
-  typedef std::map<std::string,int> IntOptions;
-  typedef std::map<std::string,double> DoubleOptions;
-  typedef std::map<std::string,std::string> StringOptions;
+  typedef std::unordered_map<std::string,int> IntOptions;
+  typedef std::unordered_map<std::string,double> DoubleOptions;
+  typedef std::unordered_map<std::string,std::string> StringOptions;
 
   virtual optionable_status_t GetIntOption(const std::string option_name, int* option_value) = 0;
   virtual optionable_status_t GetDoubleOption(const std::string option_name, double* option_value) = 0;

@@ -1,4 +1,4 @@
-#ifndef ODEX_H
+#ifndef SODEX_H
 #define SODEX_H
 
 #include <vector>

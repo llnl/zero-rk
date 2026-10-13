@@ -6,6 +6,7 @@
 #include <utilities/string_utilities.h>
 #include <utilities/math_utilities.h>
 #include <utilities/file_utilities.h>
+#include <utilities/restart_reader.h>
 
 #include "set_initial_conditions.h"
 
@@ -356,57 +357,40 @@ void SetInitialComposition(FlameParams &flame_params, double *y, double *time)
 
   // Restart using binary file if provided
   if(flame_params.parser_->restart_file() != std::string(zerork::utilities::null_filename)) {
-    const char* filename1;//[32];
-    char filename2[32];
-    int num_points_file, num_vars_file;
-
-    int npes;
-    int disp;
-    std::vector<double> buffer;
-    buffer.assign(num_local_points, 0.0);
-    double time_file = 0.0;
-
-    MPI_File restart_file;
-    npes = flame_params.npes_;
-
-    filename1 = flame_params.parser_->restart_file().c_str();
-    sprintf(filename2,"%s",filename1);
-
-    MPI_File_open(flame_params.comm_, filename2, MPI_MODE_RDONLY, MPI_INFO_NULL, &restart_file);
-
-    MPI_File_read_all(restart_file, &num_points_file, 1, MPI_INT, MPI_STATUS_IGNORE);
-    MPI_File_read_all(restart_file, &num_vars_file, 1, MPI_INT, MPI_STATUS_IGNORE);
-
-    MPI_File_read_all(restart_file, &time_file, 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
-    *time = time_file;
-
-    std::vector<string> file_state_names(num_vars_file);
-    for(int j=0; j<num_vars_file; ++j) {
-      char buf[64];
-      MPI_File_read_all(restart_file, &buf, 64, MPI_CHAR, MPI_STATUS_IGNORE);
-      file_state_names[j] = string(buf);
+    int offset = 0;
+    if(flame_params.my_pe_ == 0) {
+      offset = 1;
+    }
+    int buffer_size = num_local_points+offset;
+    if(flame_params.my_pe_ == flame_params.npes_-1) {
+      buffer_size += 1;
     }
 
-    // Initialize y to 0
-    for (int k=0; k<num_local_points*num_states; ++k)
-      y[k] = 0.0;
+#ifdef ZERORK_MPI
+    zerork::utilities::RestartReader reader(flame_params.parser_->restart_file(), buffer_size, flame_params.comm_);
+#else
+    zerork::utilities::RestartReader reader(flame_params.parser_->restart_file(), buffer_size);
+#endif
+    zerork::utilities::RestartReaderStatus read_status = reader.Status();
+    if(read_status == zerork::utilities::READER_OK) {
+      if(flame_params.my_pe_ == 0) cout << "# Restart file: " << flame_params.parser_->restart_file() <<"\n";
+      *time = reader.RestartTime();
 
-    for(int j=0; j<num_states; ++j) {
-      string state_name = zerork::utilities::GetLowerCase(flame_params.reactor_->GetNameOfStateId(j));
-      for(int i=0; i<num_vars_file; ++i) {
-        string file_state_name = zerork::utilities::GetLowerCase(file_state_names[i]);
-        //if(state_name == file_state_names[i]) {
-        if(state_name == file_state_name) {
-          // Read restart_file
-          disp = 2*sizeof(int) + sizeof(double) + num_vars_file*sizeof(char)*64
-            + i*2*sizeof(double) // Left & right BCs from previous variables
-            + sizeof(double) // Left BC from current variable
-            + (my_pe + i*npes)*num_local_points*sizeof(double);
-          MPI_File_set_view(restart_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-          MPI_File_read(restart_file, &buffer[0], num_local_points, MPI_DOUBLE, MPI_STATUS_IGNORE);
+      // Initialize y to 0
+      for (int k=0; k<num_local_points*num_states; ++k) {
+        y[k] = 0.0;
+      }
+
+      // Read data for each variable
+      std::vector<double> buffer(buffer_size, 0.0);
+      for(int j=0; j<num_states; ++j) {
+        std::string state_name = flame_params.reactor_->GetNameOfStateId(j);
+        reader.ReadField(state_name, buffer, &read_status);
+
+        if(read_status == zerork::utilities::READER_OK) {
           // Set y values
           for (int k=0; k<num_local_points; ++k) {
-            y[k*num_states + j] = buffer[k];
+            y[k*num_states + j] = buffer[k+offset];
             if(j==num_species+1){
               y[k*num_states + j] /= flame_params.ref_temperature_;
             }
@@ -417,33 +401,30 @@ void SetInitialComposition(FlameParams &flame_params, double *y, double *time)
               y[k*num_states + j] /= flame_params.ref_momentum_;
             }
           }
-          // Exit i loop
-          break;
-        }
-        if (i==num_vars_file-1 && state_name != file_state_names[i]) {
-          // Variable not found
-          if(my_pe == 0) {
-            cerr << "WARNING: " << state_name << " not found in restart file.\n";
+        } else {
+          if(read_status == zerork::utilities::READER_MISSING_FIELD) {
+            // Variable not found
+            if(flame_params.my_pe_ == 0) cerr << "WARNING: " << state_name << " not found in restart file.\n";
+          } else {
+            if(flame_params.my_pe_ == 0) cerr << "WARNING: unknown error reading " << state_name << " from restart file.\n";
 	  }
         }
-      } // for i<num_vars_file
-    } // for j<num_states
+      } // for j<num_states
 
-    // Read mass flux
-    disp = 2*sizeof(int) + sizeof(double) + num_vars_file*sizeof(char)*64
-      + num_vars_file*2*sizeof(double) // Left & right BCs from previous variables
-      + sizeof(double) // Left BC from current variable
-      + (my_pe + num_vars_file*npes)*num_local_points*sizeof(double);
-    MPI_File_set_view(restart_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-    MPI_File_read(restart_file, &buffer[0], num_local_points, MPI_DOUBLE, MPI_STATUS_IGNORE);
+      // Read mass flux
+      reader.ReadField(std::string("mass_flux"), buffer, &read_status);
+      if(read_status == zerork::utilities::READER_MISSING_FIELD) {
+        if(flame_params.my_pe_ == 0) cerr << "WARNING: mass flux not found in restart file.\n";
+      }
 
-    for (int k=0; k<num_local_points; ++k) {
-      flame_params.mass_flux_[k] = buffer[k];
-      flame_params.mass_flux_ext_[k+2] = flame_params.mass_flux_[k];
+      for (int k=0; k<num_local_points; ++k) {
+        flame_params.mass_flux_[k] = buffer[k+offset];
+        flame_params.mass_flux_ext_[k+2] = flame_params.mass_flux_[k];
+      }
+    } else {
+      if(flame_params.my_pe_ == 0) cerr << "ERROR reading restart file:" << flame_params.parser_->restart_file() <<". Quiting.\n";
+      exit(-1);
     }
-
-    MPI_File_close(&restart_file);
-
   } // if restart_file
 
 }

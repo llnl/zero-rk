@@ -48,6 +48,16 @@ NonIntegerReactionNetwork::NonIntegerReactionNetwork()
   reaction_dir_of_step_.clear();
   params_.clear();
 
+  ford_correction_k_ = 5;
+  ford_correction_c0_ = log(1.0e-16);
+  ford_correction_derivative_ = false;
+  if(getenv("ZERORK_FORD_CORRECTION_DERIVATIVE") != NULL) {
+     int ford_correction_env = atoi(getenv("ZERORK_FORD_CORRECTION_DERIVATIVE"));
+     if(ford_correction_env!=0) {
+       ford_correction_derivative_ = true;
+     }
+  }
+
 }
 
 int NonIntegerReactionNetwork::AddStep(const ckr::Reaction &ckreader_reaction,
@@ -274,6 +284,8 @@ int NonIntegerReactionNetwork::UpdateRatesOfProgress(const double concentrations
   for(int j=0; j<num_non_integer_steps; ++j) {
 
     const int num_terms = static_cast<int>(params_[j].rop_species_ids_.size());
+    bool negative_concentration = false;
+
     for(int k=0; k<num_terms; ++k) {
 
       const double species_concentration =
@@ -281,15 +293,28 @@ int NonIntegerReactionNetwork::UpdateRatesOfProgress(const double concentrations
       const double multiplier =
         pow(fabs(species_concentration),
             params_[j].rop_concentration_powers_[k]);
+      double correction = 1.0;
 
-      // preserve the sign of the concentration
-      if(species_concentration >= 0.0) {
-        rates_of_progress[params_[j].step_id_] *=  multiplier;
-      } else {
-        rates_of_progress[params_[j].step_id_] *= -multiplier;
+      if(species_concentration < 0.0) {
+	negative_concentration = true;
       }
+      if(ford_correction_derivative_) {
+        const double kx = ford_correction_k_;
+        const double x0 = ford_correction_c0_;
+	const double x = log(max(1.0e-30,species_concentration));
+        const double sigmoid = 1/(1+exp(-kx*(x-x0)));
+        correction = sigmoid + (1-sigmoid)*pow(fabs(species_concentration),1-params_[j].rop_concentration_powers_[k]);
+      }
+
+      rates_of_progress[params_[j].step_id_] *=  multiplier*correction;
+    } // k-loop over reactants
+
+    // if one or more species has a negative concentration we
+    if(negative_concentration) {
+      rates_of_progress[params_[j].step_id_] *= -1.0;
     }
-  }
+
+  } // j-loop over non-integer steps
 
   return 0;
 }
@@ -769,6 +794,21 @@ int NonIntegerReactionNetwork::GetJacobianPattern(int row_id[],
     column_id[j] = jacobian_column_id_[j];
   }
   return num_nonzeros;
+}
+
+bool NonIntegerReactionNetwork::GetFORDCorrectionDerivative() const
+{
+  return ford_correction_derivative_;
+}
+
+double NonIntegerReactionNetwork::GetFORDCorrectionDecay() const
+{
+  return ford_correction_k_;
+}
+
+double NonIntegerReactionNetwork::GetFORDCorrectionOffset() const
+{
+  return ford_correction_c0_;
 }
 
 void NonIntegerReactionNetwork::BuildJacobian()

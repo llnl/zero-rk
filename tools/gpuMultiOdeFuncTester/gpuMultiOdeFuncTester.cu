@@ -271,7 +271,7 @@ cudaMalloc((void**)&stepROP_dev,sizeof(double)*nReactors*nStep);
 
  stopTime=getHighResolutionTime();
  double gpu_devTime = stopTime - startTime;
- printf("# Elapsed time for %d*%d dy/dt calls on GPU[s]: %16.8e\n",nReactors,nEval,
+ printf("# Elapsed time for %d*%d dy/dt calls on GPU [s]: %16.8e\n",nReactors,nEval,
 	stopTime-startTime);
 
   //Test results
@@ -312,6 +312,7 @@ cudaMalloc((void**)&stepROP_dev,sizeof(double)*nReactors*nStep);
   cudaFree(stepROP_dev);
 
   // Check gpu results
+  double cutoff = 1.0e-30;
   double thresh = 1.0e-10;
   const int max_diff_print = 50;
   int diffcount = 0;
@@ -320,7 +321,7 @@ cudaMalloc((void**)&stepROP_dev,sizeof(double)*nReactors*nStep);
       int currReactor = j/nStep;
       int currStep = j%nStep;
       int j_gpu = currStep*nReactors+currReactor;
-      double diff = fabs((stepROP_cpu[j]-stepROP_gpu[j_gpu])/(stepROP_cpu[j]+stepROP_gpu[j_gpu]));
+      double diff = fabs((stepROP_cpu[j]-stepROP_gpu[j_gpu])/(stepROP_cpu[j]+stepROP_gpu[j_gpu]+cutoff));
       if( diff > thresh ) printf("Diff in ROP [%d]: %g, %g, %g\n",j,stepROP_cpu[j],stepROP_gpu[j_gpu],diff), ++diffcount;
       if(diffcount > max_diff_print) break;      
   }
@@ -332,9 +333,9 @@ cudaMalloc((void**)&stepROP_dev,sizeof(double)*nReactors*nStep);
       int currReactor = j/nSpc;
       int currSpc = j%nSpc;
       int j_gpu = currSpc*nReactors+currReactor;
-      cdiff = fabs((createRate_cpu[j]-createRate_gpu[j_gpu])/(createRate_cpu[j]+createRate_gpu[j_gpu]));
-      ddiff = fabs((destroyRate_cpu[j]-destroyRate_gpu[j_gpu])/(destroyRate_cpu[j]+destroyRate_gpu[j_gpu]));
-      ndiff = fabs((netProdRate_cpu[j]-netProdRate_gpu[j_gpu])/(netProdRate_cpu[j]+netProdRate_gpu[j_gpu]));
+      cdiff = fabs((createRate_cpu[j]-createRate_gpu[j_gpu])/(createRate_cpu[j]+createRate_gpu[j_gpu]+cutoff));
+      ddiff = fabs((destroyRate_cpu[j]-destroyRate_gpu[j_gpu])/(destroyRate_cpu[j]+destroyRate_gpu[j_gpu]+cutoff));
+      ndiff = fabs((netProdRate_cpu[j]-netProdRate_gpu[j_gpu])/(netProdRate_cpu[j]+netProdRate_gpu[j_gpu]+cutoff));
       maxdiff = max(cdiff,ddiff);
       if( maxdiff > thresh )
       {

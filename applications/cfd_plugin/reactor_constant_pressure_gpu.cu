@@ -7,6 +7,8 @@
 
 #include <thrust/functional.h>
 
+#include "cuda_transpose.h"
+
 ReactorConstantPressureGPU::ReactorConstantPressureGPU(std::shared_ptr<zerork::mechanism_cuda> mech_ptr)
  :
     ReactorNVectorSerialCuda(mech_ptr)
@@ -53,40 +55,6 @@ void ReactorConstantPressureGPU::InitializeState(
   assert(n_reactors <= max_num_reactors_);
   num_reactors_ = n_reactors;
   initial_time_ = reactor_time;
-  std::vector<double> state_host(num_variables_*num_reactors_);
-  thrust::host_vector<double> initial_temperatures(num_reactors_);
-  pressures_.resize(num_reactors_);
-  pressures_dev_.resize(num_reactors_);
-  if(dpdt != nullptr) {
-    dpdts_.resize(num_reactors_);
-  }
-  thrust::host_vector<double> e_src_host;
-  if(e_src != nullptr) {
-    e_src_host.resize(num_reactors_);
-  }
-  thrust::host_vector<double> y_src_host;
-  if(y_src != nullptr) {
-    y_src_host.resize(num_reactors_*num_species_);
-  }
-  for(int k = 0; k < num_reactors_; ++k) {
-    pressures_[k] = P[k];
-    initial_temperatures[k] = T[k];
-    if(dpdt!=nullptr) {
-      dpdts_[k] = dpdt[k];
-    }
-    if(e_src != nullptr) { 
-      e_src_host[k] = e_src[k];
-    }
-    for(int j = 0; j < num_species_; ++j) {
-      state_host[j*num_reactors_ + k] = mf[j*num_reactors_ + k];
-      if(y_src != nullptr) {
-        y_src_host[j*num_reactors_ + k] = y_src[j*num_reactors_ + k];
-      }
-    }
-    if(solve_temperature_) {
-      state_host[num_species_*num_reactors_+k] = T[k]/double_options_["reference_temperature"];
-    }
-  }
 
   N_VDestroy(state_);
   N_VDestroy(tmp1_);
@@ -98,26 +66,43 @@ void ReactorConstantPressureGPU::InitializeState(
   tmp3_ = N_VMake_Cuda(num_variables_*num_reactors_,&tmp3_data_[0], thrust::raw_pointer_cast(&tmp3_data_dev_[0]));
 
   double *y_ptr_dev = N_VGetDeviceArrayPointer_Cuda(state_);
-  cudaMemcpy(y_ptr_dev,state_host.data(),sizeof(double)*num_reactors_*num_variables_,cudaMemcpyHostToDevice);
+  cudaMemcpy(thrust::raw_pointer_cast(tmp1_data_dev_.data()),
+             mf,sizeof(double)*num_reactors_*num_species_,cudaMemcpyHostToDevice);
+  cuda_transpose(thrust::raw_pointer_cast(state_data_dev_.data()),
+		 thrust::raw_pointer_cast(tmp1_data_dev_.data()), num_species_, num_reactors_);
 
-  //Thrust copies to device
-  initial_temperatures_dev_ = initial_temperatures;
-  pressures_dev_ = pressures_;
+  initial_temperatures_dev_ = zerork::device_vector<double>(T, T+n_reactors);
+  if(solve_temperature_) {
+    cudaMemcpy(thrust::raw_pointer_cast(tmp3_data_dev_.data()),
+               thrust::raw_pointer_cast(initial_temperatures_dev_.data()),sizeof(double)*num_reactors_,cudaMemcpyDeviceToDevice);
+    thrust::device_ptr<double> scaled_temps(&y_ptr_dev[num_species_*num_reactors_]);
+    const double inv_reference_temperature = 1/double_options_["reference_temperature"];
+    thrust::transform(tmp3_data_dev_.begin(), tmp3_data_dev_.begin() + num_reactors_,
+                      scaled_temps, thrust::placeholders::_1*inv_reference_temperature);
+  }
 
-  if(dpdt != nullptr) {
-     dpdts_dev_ = dpdts_;
-  } else {
-     dpdts_dev_.clear();
-  }
-  if(e_src != nullptr) {
-     e_src_dev_ = e_src_host;
-  } else {
-     e_src_dev_.clear();
-  }
+  pressures_dev_ = zerork::device_vector<double>(P, P+n_reactors);
+
   if(y_src != nullptr) {
-     y_src_dev_ = y_src_host;
+    cudaMemcpy(thrust::raw_pointer_cast(tmp2_data_dev_.data()),
+               y_src,sizeof(double)*num_reactors_*num_species_,cudaMemcpyHostToDevice);
+    y_src_dev_.resize(num_reactors_*num_species_);
+    cuda_transpose(thrust::raw_pointer_cast(y_src_dev_.data()),
+		   thrust::raw_pointer_cast(tmp2_data_dev_.data()), num_species_, num_reactors_);
   } else {
      y_src_dev_.clear();
+  }
+
+  if(dpdt != nullptr) {
+    dpdts_dev_ = zerork::device_vector<double>(dpdt, dpdt+n_reactors);
+  } else {
+    dpdts_dev_.clear();
+  }
+
+  if(e_src != nullptr) {
+    e_src_dev_ = zerork::device_vector<double>(e_src, e_src+n_reactors);
+  } else {
+    e_src_dev_.clear();
   }
 
   inverse_densities_dev_.resize(num_reactors_);
@@ -144,8 +129,10 @@ void ReactorConstantPressureGPU::GetState(
 {
   double *y_ptr_dev = N_VGetDeviceArrayPointer_Cuda(state_);
 
+  cuda_transpose(thrust::raw_pointer_cast(tmp1_data_dev_.data()),
+		 thrust::raw_pointer_cast(state_data_dev_.data()), num_reactors_, num_species_);
   //TODO: Async
-  cudaMemcpy(mf,y_ptr_dev,sizeof(double)*num_reactors_*num_species_,cudaMemcpyDeviceToHost);
+  cudaMemcpy(mf,thrust::raw_pointer_cast(tmp1_data_dev_.data()),sizeof(double)*num_reactors_*num_species_,cudaMemcpyDeviceToHost);
   if(solve_temperature_) {
     thrust::device_ptr<double> scaled_temps(&y_ptr_dev[num_species_*num_reactors_]);
     thrust::transform(scaled_temps, scaled_temps + num_reactors_,
@@ -153,7 +140,7 @@ void ReactorConstantPressureGPU::GetState(
                       thrust::placeholders::_1*double_options_["reference_temperature"]);
   } else {
     temperatures_dev_ = initial_temperatures_dev_;
-    thrust::device_vector<double> energies_dev(initial_energies_dev_); //might be worth saving this temp vector
+    zerork::device_vector<double> energies_dev(initial_energies_dev_); //might be worth saving this temp vector
     if(e_src_dev_.size() > 0) {
       const double delta_t = reactor_time-initial_time_;
       thrust::transform(e_src_dev_.begin(), e_src_dev_.end(), initial_energies_dev_.begin(), energies_dev.begin(), saxpy_functor<double>(delta_t));
@@ -163,7 +150,7 @@ void ReactorConstantPressureGPU::GetState(
   }
   //TODO: Async
   cudaMemcpy(T,thrust::raw_pointer_cast(&temperatures_dev_[0]),sizeof(double)*num_reactors_,cudaMemcpyDeviceToHost);
-  thrust::device_vector<double> current_pressures = pressures_dev_;
+  zerork::device_vector<double> current_pressures = pressures_dev_;
   if(dpdts_dev_.size() != 0) {
     const double delta_t = reactor_time-initial_time_;
     thrust::transform(dpdts_dev_.begin(), dpdts_dev_.end(),
@@ -200,7 +187,7 @@ int ReactorConstantPressureGPU::GetTimeDerivative(const double reactor_time,
 
   //Update density (only if no y_src)
   if(y_src_dev_.size() == 0) {
-    thrust::device_vector<double> current_pressures = pressures_dev_;
+    zerork::device_vector<double> current_pressures = pressures_dev_;
     if(dpdts_dev_.size() != 0) {
       const double delta_t = reactor_time-initial_time_;
       thrust::transform(dpdts_dev_.begin(), dpdts_dev_.end(), pressures_dev_.begin(), current_pressures.begin(), saxpy_functor<double>(delta_t));
@@ -215,7 +202,7 @@ int ReactorConstantPressureGPU::GetTimeDerivative(const double reactor_time,
 
   if(e_src_dev_.size() != 0) {
     const double delta_t = reactor_time-initial_time_;
-    thrust::device_vector<double> energies_dev(num_reactors_); //might be worth saving this temp vector
+    zerork::device_vector<double> energies_dev(num_reactors_); //might be worth saving this temp vector
     thrust::transform(e_src_dev_.begin(), e_src_dev_.end(), initial_energies_dev_.begin(), energies_dev.begin(), saxpy_functor<double>(delta_t));
     mech_ptr_->getTemperatureFromHY_mr_dev(num_reactors_, thrust::raw_pointer_cast(&energies_dev[0]), y_ptr_dev, thrust::raw_pointer_cast(&temperatures_dev_[0]));
   }

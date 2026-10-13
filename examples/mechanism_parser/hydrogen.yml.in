@@ -1,0 +1,4 @@
+mech_file: "@CMAKE_INSTALL_PREFIX@/share/zerork/mechanisms/hydrogen/h2_v1b_mech.txt"
+therm_file: "@CMAKE_INSTALL_PREFIX@/share/zerork/mechanisms/hydrogen/h2_v1a_therm.txt"
+log_file: "hydrogen.clog"
+

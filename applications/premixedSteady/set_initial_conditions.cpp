@@ -6,6 +6,7 @@
 #include <utilities/string_utilities.h>
 #include <utilities/math_utilities.h>
 #include <utilities/file_utilities.h>
+#include <utilities/restart_reader.h>
 
 #include "set_initial_conditions.h"
 
@@ -311,126 +312,65 @@ void SetInitialCompositionAndWallTemp(FlameParams &flame_params, double *y, doub
 
   // If binary restart_file is provided, overwrite with that
   if(flame_params.parser_->restart_file() != std::string(zerork::utilities::null_filename)) {
-    const char* filename1;//[32];
-    char filename2[32];
-    int num_points_file, num_vars_file;
-
-    int npes;
-    int disp;
-    std::vector<double> buffer;
-    buffer.assign(num_local_points, 0.0);
-    double time_file = 0.0;
-
-#ifdef ZERORK_MPI
-    MPI_File restart_file;
-#endif
-    npes = flame_params.npes_;
-
-    filename1 = flame_params.parser_->restart_file().c_str();
-    sprintf(filename2,"%s",filename1);
-#ifdef ZERORK_MPI
-    MPI_File_open(flame_params.comm_, filename2, MPI_MODE_RDONLY, MPI_INFO_NULL, &restart_file);
-#else
-    ifstream restart_file(filename2, ios::in | ios::binary);
-#endif
-
-#ifdef ZERORK_MPI
-    MPI_File_read_all(restart_file, &num_points_file, 1, MPI_INT, MPI_STATUS_IGNORE);
-    MPI_File_read_all(restart_file, &num_vars_file, 1, MPI_INT, MPI_STATUS_IGNORE);
-#else
-    restart_file.read((char*)&num_points_file, sizeof(int));
-    restart_file.read((char*)&num_vars_file, sizeof(int));
-#endif
-    if(num_vars_file != num_states) {
-      printf("WARNING: restart file and mechanism have different number of species. Species not found will be initialized at 0.\n");
+    int offset = 0;
+    if(flame_params.my_pe_ == 0) {
+      offset = 1;
     }
+    int buffer_size = num_local_points+offset;
 
 #ifdef ZERORK_MPI
-    MPI_File_read_all(restart_file, &time_file, 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
+    zerork::utilities::RestartReader reader(flame_params.parser_->restart_file(), buffer_size, flame_params.comm_);
 #else
-    restart_file.read((char*)&time_file, sizeof(double));
+    zerork::utilities::RestartReader reader(flame_params.parser_->restart_file(), buffer_size);
 #endif
-    *time = time_file;
+    zerork::utilities::RestartReaderStatus read_status = reader.Status();
+    if(read_status == zerork::utilities::READER_OK) {
+      if(flame_params.my_pe_ == 0) cout << "# Restart file: " << flame_params.parser_->restart_file() <<"\n";
+      *time = reader.RestartTime();
 
-    std::vector<string> file_state_names(num_vars_file);
-    for(int j=0; j<num_vars_file; ++j) {
-      char buf[64];
-#ifdef ZERORK_MPI
-      MPI_File_read_all(restart_file, &buf, 64, MPI_CHAR, MPI_STATUS_IGNORE);
-#else
-      restart_file.read((char*)&buf, 64*sizeof(char));
-#endif
-      file_state_names[j] = string(buf);
-    }
+      // Initialize y to 0
+      for (int k=0; k<num_local_points*num_states; ++k) {
+        y[k] = 0.0;
+      }
 
-    // Initialize y to 0
-    for (int k=0; k<num_local_points*num_states; ++k) {
-      y[k] = 0.0;
-    }
-    double bc;
+      // Read data for each variable
+      std::vector<double> buffer(buffer_size, 0.0);
+      for(int j=0; j<num_states; ++j) {
+        std::string state_name = flame_params.reactor_->GetNameOfStateId(j);
+        reader.ReadField(state_name, buffer, &read_status);
 
-    // Read data for each variable
-    for(int j=0; j<num_states; ++j) {
-      string state_name = zerork::utilities::GetLowerCase(flame_params.reactor_->GetNameOfStateId(j));
-      for(int i=0; i<num_vars_file; ++i) {
-	string file_state_name = zerork::utilities::GetLowerCase(file_state_names[i]);
-        if(state_name == file_state_name) {
-          // Read restart_file
-#ifdef ZERORK_MPI
-          disp = 2*sizeof(int) + sizeof(double) + num_vars_file*sizeof(char)*64
-            + i*sizeof(double) //left BC from prev vars
-            + sizeof(double) //left BC from cur var
-            + (my_pe + i*npes)*num_local_points*sizeof(double);
-          MPI_File_set_view(restart_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-          MPI_File_read(restart_file, &buffer[0], num_local_points, MPI_DOUBLE, MPI_STATUS_IGNORE);
-#else
-          restart_file.read((char*)&bc, sizeof(double)); //read/skip BC
-          restart_file.read((char*)&buffer[0], num_local_points*sizeof(double));
-#endif
+        if(read_status == zerork::utilities::READER_OK) {
           // Set y values
           for (int k=0; k<num_local_points; ++k) {
-            y[k*num_states + j] = buffer[k];
+            y[k*num_states + j] = buffer[k+offset];
             if(j==num_states-2){
-              flame_params.rel_vol_[k] = buffer[k];
+              flame_params.rel_vol_[k] = buffer[k+offset];
             }
             if(j==num_states-1){
               y[k*num_states + j] /= flame_params.ref_temperature_;
             }
           }
-          // Exit i loop
-          break;
+        } else {
+          if(read_status == zerork::utilities::READER_MISSING_FIELD) {
+            // Variable not found
+            if(flame_params.my_pe_ == 0) cerr << "WARNING: " << state_name << " not found in restart file.\n";
+          } else {
+            if(flame_params.my_pe_ == 0) cerr << "WARNING: unknown error reading " << state_name << " from restart file.\n";
+	  }
         }
-        if (i==num_vars_file-1 && state_name != file_state_names[i]) {
-          // Variable not found
-          printf("WARNING: %s not found in restart file.\n", state_name.c_str() );
-        }
-      } // for i<num_vars_file
-    } // for j<num_states
+      } // for j<num_states
 
-
-    // Read mass flux
-#ifdef ZERORK_MPI
-    disp = 2*sizeof(int) + sizeof(double) + num_vars_file*sizeof(char)*64
-      + num_vars_file*sizeof(double) // left BC from prev vars
-      + sizeof(double) // left BC from cur var
-      + (my_pe + num_vars_file*npes)*num_local_points*sizeof(double);
-    MPI_File_set_view(restart_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-    MPI_File_read(restart_file, &buffer[0], num_local_points, MPI_DOUBLE, MPI_STATUS_IGNORE);
-#else
-    restart_file.read((char*)&bc, sizeof(double)); //read/skip BC
-    restart_file.read((char*)&buffer[0], num_local_points*sizeof(double));
-#endif
-    for (int k=0; k<num_local_points; ++k) {
-      y[k*num_states + num_states-2] = buffer[k];
+      // Read mass flux
+      reader.ReadField(std::string("mass_flux"), buffer, &read_status);
+      if(read_status == zerork::utilities::READER_MISSING_FIELD) {
+        if(flame_params.my_pe_ == 0) cerr << "WARNING: mass flux not found in restart file.\n";
+      }
+      for (int k=0; k<num_local_points; ++k) {
+        y[k*num_states + num_states-2] = buffer[k+offset];
+      }
+    } else {
+      if(flame_params.my_pe_ == 0) cerr << "ERROR reading restart file:" << flame_params.parser_->restart_file() <<". Skipping.\n";
     }
-
-    //close file
-#ifdef ZERORK_MPI
-    MPI_File_close(&restart_file);
-#else
-    restart_file.close();
-#endif
-
   } // if restart_file
 
   // Set jfix and Tfix

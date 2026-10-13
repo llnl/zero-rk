@@ -1,4 +1,5 @@
 #include <algorithm> //std::max,min
+#include <cassert>
 
 #include "reactor_constant_volume_cpu.h"
 

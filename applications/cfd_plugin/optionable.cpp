@@ -2,7 +2,7 @@
 #include "optionable.h"
 
 optionable_status_t Optionable::GetIntOption(const std::string option_name, int* option_value) {
-  std::map<std::string,int>::iterator it;
+  std::unordered_map<std::string,int>::iterator it;
   it = int_options_.find(option_name);
   if( it != int_options_.end() ) {
     *option_value = it->second;
@@ -13,7 +13,7 @@ optionable_status_t Optionable::GetIntOption(const std::string option_name, int*
 }
 
 optionable_status_t Optionable::GetDoubleOption(const std::string option_name, double* option_value) {
-  std::map<std::string,double>::iterator it;
+  std::unordered_map<std::string,double>::iterator it;
   it = double_options_.find(option_name);
   if( it != double_options_.end() ) {
     *option_value = it->second;
@@ -24,7 +24,7 @@ optionable_status_t Optionable::GetDoubleOption(const std::string option_name, d
 }
 
 optionable_status_t Optionable::GetStringOption(const std::string option_name, std::string* option_value) {
-  std::map<std::string,std::string>::iterator it;
+  std::unordered_map<std::string,std::string>::iterator it;
   it = string_options_.find(option_name);
   if( it != string_options_.end() ) {
     *option_value = it->second;

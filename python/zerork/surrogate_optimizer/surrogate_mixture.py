@@ -2,6 +2,7 @@
 import sys
 import os
 import dill
+import time
 import subprocess
 import numpy
 from scipy import optimize
@@ -1402,6 +1403,17 @@ class SurrogateMixture:
         minimizer_kwargs['options'] = opt_options
         minimizer_kwargs['args'] = params
         minimizer_kwargs.update(opt_kwargs)
+
+        start_time = time.perf_counter()
+        max_time = kwargs.get('max_time', 1500)
+        def callback(x,f,accept):
+            elapsed_time = time.perf_counter() - start_time
+            if(elapsed_time > max_time):
+                return True
+            else:
+                return False
+
+        bh_kwargs['callback'] = callback
         opt_result = optimize.basinhopping(self._optimize_func, guess, minimizer_kwargs=minimizer_kwargs, **bh_kwargs)
         result = self._optimize_func(opt_result.x, params, force_print=True)
         self._close_eval()

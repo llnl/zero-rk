@@ -551,7 +551,11 @@ void perf_net_cuda::calcRatesFromTC_CUDA_mr_dev(const int nReactors, const doubl
     //N.B. this happens in default stream so we don't need to sync the streams
     //  Currently if non-integer reactions exist all reactions are processed as
     //  if they are non-integer.
+    bool ford_correction_derivative = non_integer_network_.GetFORDCorrectionDerivative();
+    double ford_correction_k = non_integer_network_.GetFORDCorrectionDecay();
+    double ford_correction_c0 = non_integer_network_.GetFORDCorrectionOffset();
     perf_net_cuda_rxn_conc_mult_mr(nReactors, nSpc, nStep, maxReactants,
+        ford_correction_derivative, ford_correction_k, ford_correction_c0,
         reactantSpcIdxListUnwrapped_dev, rop_concentration_powers_dev, C_dev, stepOut_out_dev);
 #ifdef ZERORK_CUDA_EVENTS
     cudaEventRecord(endStep);

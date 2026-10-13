@@ -1,0 +1,6 @@
+
+app=mechanism_parser.x
+inp=hydrogen.yml
+
+"@CMAKE_INSTALL_PREFIX@/bin/$app" $inp
+

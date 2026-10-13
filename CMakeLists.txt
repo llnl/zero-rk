@@ -11,7 +11,7 @@ cmake_minimum_required(VERSION 3.15)
 
 include(cmake/policies.cmake)
 
-project(zerork LANGUAGES C CXX Fortran VERSION 3.0.8)
+project(zerork LANGUAGES C CXX VERSION 3.0.8)
 include(CMakeDependentOption)
 
 find_package (Python3 REQUIRED COMPONENTS Interpreter)
@@ -83,8 +83,12 @@ add_subdirectory(examples)
 add_subdirectory(data)
 
 if(${ZERORK_TESTS})
-  include(cmake/tests.cmake)
-  add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND})
-  add_subdirectory(tests)
+  if(${CMAKE_CROSSCOMPILING})
+    message(WARNING "Disabling tests when cross-compiling.")
+  else()
+    include(cmake/tests.cmake)
+    add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure)
+    add_subdirectory(tests)
+  endif()
 endif()
 

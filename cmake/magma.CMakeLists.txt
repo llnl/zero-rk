@@ -5,9 +5,9 @@ project(magma_build)
 include(ExternalProject)
 ExternalProject_Add(
   magma
-  URL http://icl.utk.edu/projectsfiles/magma/downloads/magma-2.8.0.tar.gz
-  PATCH_COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_LIST_DIR}/magma.CMakeLists.Internal.txt ${CMAKE_BINARY_DIR}/external/magma-build/magma-prefix/src/magma/CMakeLists.txt
+  URL http://icl.utk.edu/projectsfiles/magma/downloads/magma-2.10.0.tar.gz
   CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${magma_prefix}
+             -DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES_EXT}
              -DCMAKE_BUILD_TYPE=${ZERORK_EXTERNALS_BUILD_TYPE}
              -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
              -DCMAKE_POLICY_DEFAULT_CMP0091:STRING=NEW

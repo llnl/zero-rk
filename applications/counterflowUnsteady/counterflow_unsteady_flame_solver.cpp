@@ -28,6 +28,8 @@
 #include "cvode_functions.h"
 #include "set_initial_conditions.h"
 
+#include "restart_writer.h"
+
 using zerork::getHighResolutionTime;
 
 const bool RUN_DEBUG=false;
@@ -513,83 +515,63 @@ static void WriteFieldParallel(double t,
   int num_reactor_states = params.reactor_->GetNumStates();
   int num_species = params.reactor_->GetNumSpecies();
   int num_steps = params.reactor_->GetNumSteps();
-  int my_pe, npes;
-  char filename[32], *basename;
+  int npes = params.npes_;
+  int my_pe = params.my_pe_;
   bool dump_mole_fractions = params.parser_->write_mole_fractions_to_field_files();
   bool dump_step_rates = params.parser_->write_step_rates_to_field_files();
 
-  int disp;
-  std::vector<double> buffer(num_local_points+2, 0.0);
-  std::vector<char> charbuf(64,0);
 
-  MPI_File output_file;
-  MPI_Comm_rank(MPI_COMM_WORLD, &my_pe);
-  MPI_Comm_size(MPI_COMM_WORLD, &npes);
-
-  int global_size = (num_grid_points+2)*sizeof(double);
   int field_count = num_local_points;
   if(my_pe == 0) field_count +=1; //left BC
   if(my_pe == npes-1) field_count +=1; //right BC
-  std::vector<int> field_index(npes,0);
-  for(int j = 1; j<npes; ++j) {
-    field_index[j] = field_index[j-1]+num_local_points;
-    if(j==1) field_index[j] += 1; //left BC
+ 
+  std::string filename = "data_" + std::to_string(t);
+
+  // Count Variables
+  int num_vars = num_reactor_states; //excludes mass flux
+  if(dump_mole_fractions) num_vars += num_species;
+  if(dump_step_rates) num_vars += num_steps + num_species;
+
+  // Collect state names
+  std::vector<std::string> state_names(num_vars);
+  for(int j=0; j<num_reactor_states; ++j) {
+    state_names[j] = params.reactor_->GetNameOfStateId(j);
   }
-  
-  basename = "data_";
-  sprintf(filename, "%s%f", basename, t);
-
-  MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_CREATE | MPI_MODE_RDWR,
-		MPI_INFO_NULL, &output_file);
-
-  int header_size = 0;
-  // Write header
-  if(my_pe == 0) {
-    MPI_File_write(output_file, &num_grid_points_ext, 1, MPI_INT, MPI_STATUS_IGNORE);//num points
-    int num_vars = num_reactor_states; //excludes mass flux
-    if(dump_mole_fractions) num_vars += num_species;
-    if(dump_step_rates) num_vars += num_steps + num_species;
-    MPI_File_write(output_file, &num_vars, 1, MPI_INT, MPI_STATUS_IGNORE);//num variables
-    MPI_File_write(output_file, &t, 1, MPI_DOUBLE, MPI_STATUS_IGNORE); //time
+  int names_offset = num_reactor_states;
+  if(dump_mole_fractions) {
     for(int j=0; j<num_reactor_states; ++j) {
       std::string state_name = params.reactor_->GetNameOfStateId(j);
-      strcpy(&charbuf[0], state_name.c_str());
-      MPI_File_write(output_file, &charbuf[0], 64, MPI_CHAR, MPI_STATUS_IGNORE); //state name
-    }
-    header_size = 2*sizeof(int) + sizeof(double) + num_vars*sizeof(char)*64;
-    if(dump_mole_fractions) {
-      for(int j=0; j<num_reactor_states; ++j) {
-        std::string state_name = params.reactor_->GetNameOfStateId(j);
-        size_t found = state_name.find("MassFraction");
-        if(found != std::string::npos) {
-          state_name.replace(0, 4, "Mole");
-          strcpy(&charbuf[0], state_name.c_str());
-          MPI_File_write(output_file, &charbuf[0], 64, MPI_CHAR, MPI_STATUS_IGNORE); //state name
-        }
+      size_t found = state_name.find("MassFraction");
+      if(found != std::string::npos) {
+        state_name.replace(0, 4, "Mole");
+        state_names[names_offset+j] = state_name;
       }
     }
-    if(dump_step_rates) {
-      for(int j=0; j<num_steps; ++j) {
-	std::string step_name;
-	params.reactor_->GetMechanism()->getReactionNameDirOfStep(j, &step_name);
-	snprintf(&charbuf[0], 64, "%s ROP", step_name.c_str());
-        MPI_File_write(output_file, &charbuf[0], 64, MPI_CHAR, MPI_STATUS_IGNORE); //state name
-      }
-      for(int j=0; j<num_species; ++j) {
-        std::string state_name = params.reactor_->GetNameOfStateId(j);
-        size_t found = state_name.find("MassFraction");
-        if(found != std::string::npos) {
-          state_name.replace(0, 12, "NetProductionRate");
-	  snprintf(&charbuf[0], 64, "%s", state_name.c_str());
-          MPI_File_write(output_file, &charbuf[0], 64, MPI_CHAR, MPI_STATUS_IGNORE); //state name
-	}
-      }
-    }
-    MPI_File_seek(output_file, 0, MPI_SEEK_SET);
+    names_offset += num_species;
   }
-  MPI_Bcast(&header_size,1,MPI_INT,0,MPI_COMM_WORLD);
+  if(dump_step_rates) {
+    for(int j=0; j<num_steps; ++j) {
+      std::string step_name;
+      params.reactor_->GetMechanism()->getReactionNameDirOfStep(j, &step_name);
+      state_names[names_offset+j] = step_name + " ROP";
+    }
+    names_offset += num_steps;
+    for(int j=0; j<num_species; ++j) {
+      std::string state_name = params.reactor_->GetNameOfStateId(j);
+      size_t found = state_name.find("MassFraction");
+      if(found != std::string::npos) {
+        state_name.replace(0, 12, "NetProductionRate");
+        state_names[names_offset+j] = state_name;
+      }
+    }
+  }
+
+  //Instantiate Writer
+  zerork::utilities::RestartWriter writer(filename, field_count, num_vars, t, state_names, MPI_COMM_WORLD);
+
 
   // Write data for each variable
+  std::vector<double> buffer(field_count,0);
   for(int j=0; j<num_reactor_states; ++j) {
     int offset = 0;
     if(my_pe == 0) {
@@ -648,13 +630,8 @@ static void WriteFieldParallel(double t,
         buffer[num_local_points+offset] = params.oxidizer_mass_fractions_[j];
       }
     }
-
-    disp = header_size;
-    disp += j*global_size;
-    disp += field_index[my_pe]*sizeof(double);
-    MPI_File_write_at(output_file, disp, &buffer[0], field_count, MPI_DOUBLE, MPI_STATUS_IGNORE);
+    writer.WriteField(buffer);
   }
-  int vars_written = num_reactor_states;
 
   if(dump_mole_fractions) {
     std::vector<double> inlet_mole_fractions(num_species);
@@ -690,12 +667,8 @@ static void WriteFieldParallel(double t,
         buffer[num_local_points+offset] = oxidizer_mole_fractions[j];
       }
 
-      disp = header_size;
-      disp += (vars_written+j)*global_size;
-      disp += field_index[my_pe]*sizeof(double);
-      MPI_File_write_at(output_file, disp, &buffer[0], field_count, MPI_DOUBLE, MPI_STATUS_IGNORE);
+      writer.WriteField(buffer);
     }
-    vars_written += num_species;
   }
 
   if(dump_step_rates) {
@@ -775,12 +748,8 @@ static void WriteFieldParallel(double t,
         buffer[num_local_points+offset] = oxidizer_step_rates[j];
       }
 
-      disp = header_size;
-      disp += (vars_written+j)*global_size;
-      disp += field_index[my_pe]*sizeof(double);
-      MPI_File_write_at(output_file, disp, &buffer[0], field_count, MPI_DOUBLE, MPI_STATUS_IGNORE);
+      writer.WriteField(buffer);
     }
-    vars_written += num_steps;
 
     for(int j=0; j<num_species; ++j) {
       int offset = 0;
@@ -804,12 +773,8 @@ static void WriteFieldParallel(double t,
         // Write right (oxidizer) BC data
         buffer[num_local_points+offset] = oxidizer_net_rates[j];
       }
-      disp = header_size;
-      disp += (vars_written+j)*global_size;
-      disp += field_index[my_pe]*sizeof(double);
-      MPI_File_write_at(output_file, disp, &buffer[0], field_count, MPI_DOUBLE, MPI_STATUS_IGNORE);
+      writer.WriteField(buffer);
     }
-    vars_written += num_species;
   }
 
   int offset = 0;
@@ -829,12 +794,8 @@ static void WriteFieldParallel(double t,
     // Right BC
     buffer[num_local_points+offset] = params.mass_flux_oxidizer_;
   }
-  disp = header_size;
-  disp += vars_written*global_size;
-  disp += field_index[my_pe]*sizeof(double);
-  MPI_File_write_at(output_file, disp, &buffer[0], field_count, MPI_DOUBLE, MPI_STATUS_IGNORE);
 
-  MPI_File_close(&output_file);
+  writer.WriteField(buffer);
 }
 
 
@@ -1238,3 +1199,4 @@ static int SootOutput(const FlameParams &params,
 
   return 0;
 }
+

@@ -19,25 +19,24 @@
 #include "zrkmatrix_lapackdense.h"
 #include <sundials/sundials_types.h>
 
-#include "blas_stubs.h"
 #if defined(SUNDIALS_DOUBLE_PRECISION)
-extern int DSCAL(int *n, double *alpha, double *x, int *incx);
-extern int DCOPY(int *n, double *x, int* incx, double *y, int* incy);
-extern int DAXPY(int *n, double *alpha, double* x, int* incx, double* y, int* incy);
-extern int DGEMV(const char* trans, int* m, int* n, double* alpha, double* a, int* lda, double* x, int* incx, double* beta, double* y, int* incy);
-#define xscal DSCAL
-#define xcopy DCOPY
-#define xaxpy DAXPY
-#define xgemv DGEMV
+extern int dscal_(int *n, double *alpha, double *x, int *incx);
+extern int dcopy_(int *n, double *x, int* incx, double *y, int* incy);
+extern int daxpy_(int *n, double *alpha, double* x, int* incx, double* y, int* incy);
+extern int dgemv_(const char* trans, int* m, int* n, double* alpha, double* a, int* lda, double* x, int* incx, double* beta, double* y, int* incy);
+#define xscal dscal_
+#define xcopy dcopy_
+#define xaxpy daxpy_
+#define xgemv dgemv_
 #elif defined(SUNDIALS_SINGLE_PRECISION)
-extern int SSCAL(int *n, float *alpha, float *x, int *incx);
-extern int SCOPY(int *n, float *x, int* incx, float *y, int* incy);
-extern int SAXPY(int *n, float *alpha, float* x, int* incx, float* y, int* incy);
-extern int SGEMV(const char* trans, int* m, int* n, float* alpha, float* a, int* lda, float* x, int* incx, float* beta, float* y, int* incy);
-#define xscal SSCAL
-#define xcopy SCOPY
-#define xaxpy SAXPY
-#define xgemv SGEMV
+extern int sscal_(int *n, float *alpha, float *x, int *incx);
+extern int scopy_(int *n, float *x, int* incx, float *y, int* incy);
+extern int saxpy_(int *n, float *alpha, float* x, int* incx, float* y, int* incy);
+extern int sgemv_(const char* trans, int* m, int* n, float* alpha, float* a, int* lda, float* x, int* incx, float* beta, float* y, int* incy);
+#define xscal sscal_
+#define xcopy scopy_
+#define xaxpy saxpy_
+#define xgemv sgemv_
 #else
 #error  Incompatible realtype for ZRKLapackDense Matrix
 #endif

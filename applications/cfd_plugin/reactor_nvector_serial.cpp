@@ -1,6 +1,7 @@
 
 #include <cmath> //sqrt
 #include <algorithm> //max
+#include <cassert>
 
 #include "utility_funcs.h"
 #include "reactor_nvector_serial.h"

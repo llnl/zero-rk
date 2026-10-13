@@ -36,43 +36,12 @@ if __name__ == '__main__':
 
     #Set the reactions to be optimized.  Matches are based on reaction equation.
     #Reaction strings should not include white-space
-    moh.set_rxn_opt("oh+h2=h+h2o", 2, 100) #Optional A multiplier and Ea delta
-                                           #Defaults are 2 and None
-                                           #Note: User is responsible
-                                           #      for consistent Ea units
-                                           #      if None, Ea is not optimized
-    moh.set_rxn_opt("h+o2=o+oh", 2, 1000)
-    moh.set_rxn_opt("h2o2+h=h2+ho2", 2, 1000)
+    moh.set_rxn_opt("oh+h2=h+h2o", A_mult=2, n_delta=1.0, Ea_delta=1000)
+    moh.set_rxn_opt("h+o2=o+oh", A_mult=2, n_delta=1.0, Ea_delta=1000)
+    moh.set_rxn_opt("h2o2+h=h2+ho2", A_mult=2, n_delta=1.0, Ea_delta=1000)
 
-    #If verbose each evaluation will be printed out
-    moh.set_verbose(True)
+    moh.optimize(check_interval=50, method='basinhopping',
+                 output_directory='h2_optimization')
 
-    #Mechanism optimizer provides the optimization bounds
-    opt_bounds = moh.get_opt_bounds()
-
-    #Using differential optimization for global optimization
-    #Other optimization methods can be used to optimize `moh.opt_fn`
-    opt_result = optimize.differential_evolution(moh.opt_fn,  opt_bounds,
-                                                 popsize=10,
-                                                 maxiter=2,
-                                                 seed=42,
-                                                 polish=False)
-
-    x_opt = opt_result.x
-    #Write out the resulting optimized mechanism.
-    moh.write_mech(x_opt, 'chem_opt.inp')
-
-    ##Trial mechanisms can also be generated from verbose logs
-    ##For example, create `moh` as above
-
-    #Set `log_file` to log from optimization
-    #data=np.genfromtxt(log_file, delimiter=",", invalid_raise=False)
-    #opt_vals = data[:,-1]
-    #idx = opt_vals.argsort()[0]
-    #Get parametemrs from lowest objective function
-    #x = data[idx,:-1]
-
-    #Write out the trial mechanism
-    #moh.write_mech(x, 'chem_trial.inp')
 
 

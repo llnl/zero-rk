@@ -1,38 +1,41 @@
 #include "superlu_manager.h"
 
 #include <algorithm>
+#include "slu_ddefs.h"
+#include "slu_data.h"
 
 superlu_manager::superlu_manager() :
   m_last_factor_nnz(-1),
-  m_factored(false)
+  m_factored(false),
+  m_slu_container(std::make_unique<slu_data>())
 {
-  dCreate_CompCol_Matrix(&m_M, 1, 1, 1, NULL, NULL, NULL, SLU_NC,SLU_D,SLU_GE);
-  dCreate_Dense_Matrix(&m_B,1,1,NULL,1,SLU_DN,SLU_D,SLU_GE);
-  dCreate_Dense_Matrix(&m_X,1,1,NULL,1,SLU_DN,SLU_D,SLU_GE);
-  set_default_options(&m_options);
-  m_options.ColPerm = MY_PERMC;
-  m_options.RowPerm = LargeDiag_MC64;
-  m_options.Equil   = YES;
-  m_options.DiagPivotThresh = 0.0;
+  dCreate_CompCol_Matrix(&m_slu_container->M, 1, 1, 1, NULL, NULL, NULL, SLU_NC,SLU_D,SLU_GE);
+  dCreate_Dense_Matrix(&m_slu_container->B,1,1,NULL,1,SLU_DN,SLU_D,SLU_GE);
+  dCreate_Dense_Matrix(&m_slu_container->X,1,1,NULL,1,SLU_DN,SLU_D,SLU_GE);
+  set_default_options(&m_slu_container->options);
+  m_slu_container->options.ColPerm = MY_PERMC;
+  m_slu_container->options.RowPerm = LargeDiag_MC64;
+  m_slu_container->options.Equil   = YES;
+  m_slu_container->options.DiagPivotThresh = 0.0;
 
-  StatInit(&m_stats);
+  StatInit(&m_slu_container->stats);
 }
 
 superlu_manager::~superlu_manager()
 {
-  StatFree(&m_stats);
-  Destroy_SuperMatrix_Store(&m_B);
-  Destroy_SuperMatrix_Store(&m_X);
+  StatFree(&m_slu_container->stats);
+  Destroy_SuperMatrix_Store(&m_slu_container->B);
+  Destroy_SuperMatrix_Store(&m_slu_container->X);
   if(m_factored) {
-    Destroy_SuperNode_Matrix(&m_L);
-    Destroy_CompCol_Matrix(&m_U);
+    Destroy_SuperNode_Matrix(&m_slu_container->L);
+    Destroy_CompCol_Matrix(&m_slu_container->U);
   }
-  Destroy_SuperMatrix_Store(&m_M);
+  Destroy_SuperMatrix_Store(&m_slu_container->M);
 }
 
 void superlu_manager::setup_memory(int n, int nnz, const int* indexes, const int* sums, const double* values) {
-  m_M.nrow = n;
-  m_M.ncol = n;
+  m_slu_container->M.nrow = n;
+  m_slu_container->M.ncol = n;
 
   m_colPermutation.assign(n,0);
   m_rowPermutation.assign(n,0);
@@ -40,12 +43,12 @@ void superlu_manager::setup_memory(int n, int nnz, const int* indexes, const int
   m_R.assign(n,0.0);
   m_C.assign(n,0.0);
 
-  m_B.nrow=n;
-  m_X.nrow=n;
-  m_B.ncol=1;
-  m_X.ncol=1;
-  ((DNformat *)m_B.Store)->lda = n;
-  ((DNformat *)m_X.Store)->lda = n;
+  m_slu_container->B.nrow=n;
+  m_slu_container->X.nrow=n;
+  m_slu_container->B.ncol=1;
+  m_slu_container->X.ncol=1;
+  ((DNformat *)m_slu_container->B.Store)->lda = n;
+  ((DNformat *)m_slu_container->X.Store)->lda = n;
 }
 
 
@@ -75,19 +78,19 @@ int superlu_manager::factor(int n,
     setup_memory(n, nnz, indexes, sums, values);
   }
 
-  ((NCformat *)m_M.Store)->nnz = nnz;
-  ((NCformat *)m_M.Store)->nzval = const_cast<double*>(values);
-  ((NCformat *)m_M.Store)->rowind = const_cast<int*>(indexes);
-  ((NCformat *)m_M.Store)->colptr = const_cast<int*>(sums);
+  ((NCformat *)m_slu_container->M.Store)->nnz = nnz;
+  ((NCformat *)m_slu_container->M.Store)->nzval = const_cast<double*>(values);
+  ((NCformat *)m_slu_container->M.Store)->rowind = const_cast<int*>(indexes);
+  ((NCformat *)m_slu_container->M.Store)->colptr = const_cast<int*>(sums);
 
   if(m_factored) {
-    Destroy_SuperNode_Matrix(&m_L);
-    Destroy_CompCol_Matrix(&m_U);
+    Destroy_SuperNode_Matrix(&m_slu_container->L);
+    Destroy_CompCol_Matrix(&m_slu_container->U);
   }
 
-  m_B.ncol=0;
-  m_options.Fact=DOFACT;
-  get_perm_c(MMD_AT_PLUS_A, &m_M, &m_colPermutation[0]);
+  m_slu_container->B.ncol=0;
+  m_slu_container->options.Fact=DOFACT;
+  get_perm_c(MMD_AT_PLUS_A, &m_slu_container->M, &m_colPermutation[0]);
 
   int lwork=0;      // SuperLU allocates its own memeory
   void *work=NULL;  // ''
@@ -95,13 +98,11 @@ int superlu_manager::factor(int n,
   double *ferr = NULL; //Not factoring so un-used
   double *berr = NULL;
   int flag;
-  dgssvx(&m_options,&m_M, &m_colPermutation[0],&m_rowPermutation[0],
-         &m_colElimTree[0],m_equed,&m_R[0],&m_C[0],&m_L, &m_U, work, lwork,
-         &m_B, &m_X, &rpg, &rcond, ferr, berr,
-#if SUPERLU_MAJOR_VERSION > 4
-         &m_Glu,
-#endif
-         &m_mem_usage, &m_stats, &flag);
+  dgssvx(&m_slu_container->options,&m_slu_container->M, &m_colPermutation[0],&m_rowPermutation[0],
+         &m_colElimTree[0],m_equed,&m_R[0],&m_C[0],&m_slu_container->L, &m_slu_container->U, work, lwork,
+         &m_slu_container->B, &m_slu_container->X, &rpg, &rcond, ferr, berr,
+         &m_slu_container->Glu,
+         &m_slu_container->mem_usage, &m_slu_container->stats, &flag);
 
   m_factored=true;
   m_last_factor_n = n;
@@ -121,12 +122,12 @@ int superlu_manager::refactor(int nnz, const double* values)
   if(nnz != m_last_factor_nnz) {
     return 1;
   }
-  ((NCformat *)m_M.Store)->nzval = const_cast<double*>(values);
-  Destroy_SuperNode_Matrix(&m_L);
-  Destroy_CompCol_Matrix(&m_U);
+  ((NCformat *)m_slu_container->M.Store)->nzval = const_cast<double*>(values);
+  Destroy_SuperNode_Matrix(&m_slu_container->L);
+  Destroy_CompCol_Matrix(&m_slu_container->U);
 
-  m_B.ncol=0;
-  m_options.Fact=SamePattern;
+  m_slu_container->B.ncol=0;
+  m_slu_container->options.Fact=SamePattern;
 
   int lwork=0;      // SuperLU allocates its own memeory
   void *work=NULL;  // ''
@@ -134,15 +135,13 @@ int superlu_manager::refactor(int nnz, const double* values)
   double *ferr = NULL; //Not factoring so un-used
   double *berr = NULL;
   int flag;
-  dgssvx(&m_options,&m_M, &m_colPermutation[0],&m_rowPermutation[0],
-         &m_colElimTree[0],m_equed,&m_R[0],&m_C[0],&m_L, &m_U, work, lwork,
-         &m_B, &m_X, &rpg, &rcond, ferr, berr,
-#if SUPERLU_MAJOR_VERSION > 4
-         &m_Glu,
-#endif
-         &m_mem_usage, &m_stats, &flag);
+  dgssvx(&m_slu_container->options,&m_slu_container->M, &m_colPermutation[0],&m_rowPermutation[0],
+         &m_colElimTree[0],m_equed,&m_R[0],&m_C[0],&m_slu_container->L, &m_slu_container->U, work, lwork,
+         &m_slu_container->B, &m_slu_container->X, &rpg, &rcond, ferr, berr,
+         &m_slu_container->Glu,
+         &m_slu_container->mem_usage, &m_slu_container->stats, &flag);
 
-  //if(m_options.DiagPivotThresh > 0.0) {
+  //if(m_slu_container->options.DiagPivotThresh > 0.0) {
     for(int j = 0; j < m_last_factor_n; ++j) {
       if(m_rowPermutation[j] == -1 ) {
         flag = 1;
@@ -173,20 +172,18 @@ int superlu_manager::solve(int n, const double* rhs, double* soln) {
   double rpg,rcond;
   double ferr[1],berr[1]; // length is the number of RHS
 
-  m_options.Fact=FACTORED;
-  m_B.ncol=1;
+  m_slu_container->options.Fact=FACTORED;
+  m_slu_container->B.ncol=1;
 
-  ((DNformat *)m_B.Store)->nzval = const_cast<double*>(rhs);
-  ((DNformat *)m_X.Store)->nzval = soln;
+  ((DNformat *)m_slu_container->B.Store)->nzval = const_cast<double*>(rhs);
+  ((DNformat *)m_slu_container->X.Store)->nzval = soln;
 
   //backsolve with expert driver function
-  dgssvx(&m_options,&m_M,&m_colPermutation[0],&m_rowPermutation[0],
-         &m_colElimTree[0], m_equed, &m_R[0], &m_C[0], &m_L, &m_U,
-	 work, lwork, &m_B, &m_X, &rpg, &rcond, ferr, berr,
-#if SUPERLU_MAJOR_VERSION > 4
-         &m_Glu,
-#endif
-         &m_mem_usage, &m_stats, &flag);
+  dgssvx(&m_slu_container->options,&m_slu_container->M,&m_colPermutation[0],&m_rowPermutation[0],
+         &m_colElimTree[0], m_equed, &m_R[0], &m_C[0], &m_slu_container->L, &m_slu_container->U,
+	 work, lwork, &m_slu_container->B, &m_slu_container->X, &rpg, &rcond, ferr, berr,
+         &m_slu_container->Glu,
+         &m_slu_container->mem_usage, &m_slu_container->stats, &flag);
 
   return flag;
 }
@@ -209,11 +206,11 @@ int superlu_manager::GetLU(int* L_nnz,
   const int n = m_last_factor_n;
   // Convert SuperLU L and U to CSR format
   if(transpose) {
-    *L_nnz = ((SCformat *)m_U.Store)->nnz;
-    *U_nnz = ((NCformat *)m_L.Store)->nnz;
+    *L_nnz = ((SCformat *)m_slu_container->U.Store)->nnz;
+    *U_nnz = ((NCformat *)m_slu_container->L.Store)->nnz;
   } else {
-    *L_nnz = ((SCformat *)m_L.Store)->nnz;
-    *U_nnz = ((NCformat *)m_U.Store)->nnz;
+    *L_nnz = ((SCformat *)m_slu_container->L.Store)->nnz;
+    *U_nnz = ((NCformat *)m_slu_container->U.Store)->nnz;
   }
 
   L_sums->resize(n+1);
@@ -234,7 +231,7 @@ int superlu_manager::GetLU(int* L_nnz,
   int scatter_counter = 0;
 
   //U matrix
-  NCformat *Ustore ((NCformat *)m_U.Store);
+  NCformat *Ustore ((NCformat *)m_slu_container->U.Store);
   for(int j = 0; j < n; ++j) {
       for (int i = Ustore->colptr[j]; i < Ustore->colptr[j+1]; ++i) {
          scattered_vals[scatter_counter].first.first = Ustore->rowind[i]; // row
@@ -245,7 +242,7 @@ int superlu_manager::GetLU(int* L_nnz,
   }
 
   //L matrix
-  SCformat *Lstore = ((SCformat *)m_L.Store);
+  SCformat *Lstore = ((SCformat *)m_slu_container->L.Store);
   double* dp = (double *) Lstore->nzval;
   int* sup_to_col = Lstore->sup_to_col;
   int* rowind_colptr = Lstore->rowind_colptr;
@@ -370,9 +367,9 @@ int superlu_manager::GetInversePermutations(std::vector<int> *invRowPerm, std::v
 void superlu_manager::SetTranspose(const bool transpose)
 {
   if(transpose) {
-    m_options.Trans = TRANS;
+    m_slu_container->options.Trans = TRANS;
   } else {
-    m_options.Trans = NOTRANS;
+    m_slu_container->options.Trans = NOTRANS;
   }
 }
 

@@ -16,6 +16,7 @@
 
 #ifdef ZERORK_MPI
 #include "mpi.h"
+#include "utilities/mpi_utilities.h"
 #endif
 
 const int MAX_SPECNAME_LEN=256;
@@ -84,6 +85,11 @@ void getSimHeader_full(const int inp_argc,
                       const cv_param *cvp,
                       std::string *simHead);
 
+typedef struct
+{
+  int rxnId;
+  std::vector<double> relSens;
+} rxnSens_t;
 
 void cvReactor(int inp_argc, char **inp_argv)
 {
@@ -101,7 +107,7 @@ void cvReactor(int inp_argc, char **inp_argv)
 
   FILE *idtFilePtr,*thistFilePtr;
   int j,k;
-  int nTrackSpec,nSpc,nState,nStep;
+  int nSpc,nState,nStep;
   double tnext,tcurr;
   // cvode variables
   N_Vector systemState;
@@ -169,6 +175,8 @@ void cvReactor(int inp_argc, char **inp_argv)
   systemParam.sqrtUnitRnd=sqrt(UNIT_ROUNDOFF);
   systemParam.Tref=idt_ctrl.getRefTemp();
   systemParam.mech=idt_ctrl.getMechPtr();
+  systemParam.htxModel = zerork::HeatTransferModelFactory(systemParam.mech,  idt_ctrl);
+  systemParam.multipliers.assign(nStep, 1.0);
 
   systemParam.energyEnabled=idt_ctrl.energyEnabled();
   systemParam.Kpressure=idt_ctrl.getPressureCoefficient();
@@ -293,7 +301,6 @@ void cvReactor(int inp_argc, char **inp_argv)
 #endif
   stopTime=getHighResolutionTime();
 //  setupCVode=stopTime-startTime;
-  nTrackSpec = idt_ctrl.getNumTrackSpecies();
 
   // ready for integration
   if(mpi_rank == 0) {
@@ -346,14 +353,26 @@ void cvReactor(int inp_argc, char **inp_argv)
 
   std::vector<std::string> idt_lines;
   std::vector<std::string> thist_lines;
+  int start_idx = mpi_rank;
   int local_idx = 0;
+  int num_runs = idt_ctrl.getRunTotal();
+  if(idt_ctrl.sensitivity_analysis()) {
+    if(num_runs > 1) {
+      if(mpi_rank == 0) {
+        printf("WARNING: Sensitivity analysis enabled but more than one condition specified\n");
+        printf("         Only running first condition.\n");
+      }
+    }
+    num_runs = 1;
+    start_idx = 0;
+  }
 
   //Each rank starts at correct offset
-  for(j = 0; j < mpi_rank; ++j)
+  for(j = 0; j < start_idx; ++j)
   {
     idt_ctrl.incrementRunId();
   }
-  for(j=mpi_rank; j<idt_ctrl.getRunTotal(); j+=mpi_size, local_idx++)
+  for(j=start_idx; j<num_runs; j+=mpi_size, local_idx++)
   {
     idt_lines.push_back(std::string(""));
     thist_lines.push_back(std::string(""));
@@ -380,32 +399,43 @@ void cvReactor(int inp_argc, char **inp_argv)
     // reset the preconditioner threshold
     change_JsparseThresh(systemParam.sparseMtx,idt_ctrl.getThresh());
 
-    // reset the mass fraction density and relative volume
-    idt_ctrl.getInitMassFrac(massFracPtr);
-    for(k=0; k<nSpc; k++) {systemParam.yInlet[k]=massFracPtr[k];}
-    systemParam.pressure=idt_ctrl.getInitPres();
+    if(local_idx == 0 || !idt_ctrl.extinctionCurveSweep()) {
+      // reset the mass fraction density and relative volume
+      idt_ctrl.getInitMassFrac(massFracPtr);
+      for(k=0; k<nSpc; k++) {systemParam.yInlet[k]=massFracPtr[k];}
+      systemParam.pressure=idt_ctrl.getInitPres();
 
-    systemParam.mech->getEnthalpy_RT(idt_ctrl.getInitTemp(),systemParam.Energy);
-    systemParam.enthalpyInlet=0.0;
-    for(k=0; k<nSpc; k++)
-    {systemParam.enthalpyInlet+=systemParam.Energy[k]*massFracPtr[k]*systemParam.invMolWt[k];}
-    systemParam.enthalpyInlet*=systemParam.mech->getGasConstant()*idt_ctrl.getInitTemp()/idt_ctrl.getRefTemp();
+      systemParam.mech->getEnthalpy_RT(idt_ctrl.getInitTemp(),systemParam.Energy);
+      systemParam.enthalpyInlet=0.0;
+      for(k=0; k<nSpc; k++)
+      {systemParam.enthalpyInlet+=systemParam.Energy[k]*massFracPtr[k]*systemParam.invMolWt[k];}
+      systemParam.enthalpyInlet*=systemParam.mech->getGasConstant()*idt_ctrl.getInitTemp()/idt_ctrl.getRefTemp();
+
+      if(idt_ctrl.use_equilibrium_for_initialization()) {
+        zerork::equilibrium_solver zcm(*systemParam.mech);
+        double Teq = idt_ctrl.getInitTemp();
+        zcm.equilibrate(systemParam.pressure, Teq, &massFracPtr[0]);
+        systemParam.Dens = systemParam.mech->getDensityFromTPY(Teq,systemParam.pressure,&massFracPtr[0]);
+        NV_Ith_S(systemState,nSpc)= Teq/idt_ctrl.getRefTemp();
+      } else {
+        double Tinit = idt_ctrl.getInitTemp();
+        if(idt_ctrl.ignition_temperature() > 0.0) {
+          Tinit = idt_ctrl.ignition_temperature();
+        }
+        systemParam.Dens = systemParam.mech->getDensityFromTPY(Tinit,systemParam.pressure,&massFracPtr[0]);
+        NV_Ith_S(systemState,nSpc)= Tinit/idt_ctrl.getRefTemp();
+      }
+      systemParam.invDens=1.0/systemParam.Dens;
+      systemParam.volume=systemParam.htxModel->reactor_volume();
+      systemParam.mass=systemParam.Dens*systemParam.volume;
+      NV_Ith_S(systemState,nSpc+1)=systemParam.mass;
+    }
     systemParam.residenceTime=idt_ctrl.getResidenceTime();
 
-    if(idt_ctrl.use_equilibrium_for_initialization()) {
-      zerork::equilibrium_solver zcm(*systemParam.mech);
-      double Teq = idt_ctrl.getInitTemp()-50;
-      zcm.equilibrate(systemParam.pressure, Teq, &massFracPtr[0]);
-      systemParam.Dens = systemParam.mech->getDensityFromTPY(Teq,systemParam.pressure,&massFracPtr[0]);
-      NV_Ith_S(systemState,nSpc)= Teq/idt_ctrl.getRefTemp();
-    } else {
-      systemParam.Dens=idt_ctrl.getDensity();
-      NV_Ith_S(systemState,nSpc)= idt_ctrl.getInitTemp()/idt_ctrl.getRefTemp();
-    }
-    systemParam.invDens=1.0/systemParam.Dens;
-    systemParam.volume=idt_ctrl.getVolume();
-    systemParam.mass=systemParam.Dens*systemParam.volume;
-    NV_Ith_S(systemState,nSpc+1)=systemParam.mass;
+    N_Vector tmp_deriv;
+    tmp_deriv = N_VNew_Serial(nSpc+2);
+    const_vol_wsr(0.0, systemState, tmp_deriv, (void*)&systemParam);
+    N_VDestroy_Serial(tmp_deriv);
 
     systemParam.tempRoot = idt_ctrl.getInitTemp() + 50; //50 K higher than the inlet
 
@@ -557,45 +587,57 @@ void cvReactor(int inp_argc, char **inp_argv)
     }
 
 #ifdef ZERORK_MPI
-  for(j = 0; j < (idt_ctrl.getRunTotal()+mpi_size-1)/mpi_size; ++j)
-  {
-    for(k = 0; k < mpi_size; ++k)
+  if(!idt_ctrl.sensitivity_analysis()) {
+    for(j = 0; j < (idt_ctrl.getRunTotal()+mpi_size-1)/mpi_size; ++j)
     {
-      int current_run = mpi_size*j+k;
-      if(current_run >= idt_ctrl.getRunTotal())
+      for(k = 0; k < mpi_size; ++k)
       {
-        break;
-      }
-      std::string current_thist_lines;
-      std::string current_idt_lines;
-      if(k != 0) {
-        mpi_sendrecv_string(k, 0, thist_lines[j], &current_thist_lines, MPI_COMM_WORLD);
-        mpi_sendrecv_string(k, 0, idt_lines[j], &current_idt_lines, MPI_COMM_WORLD);
-      } else {
-        if(mpi_rank == 0) {
-          current_thist_lines = thist_lines[j];
-          current_idt_lines = idt_lines[j];
+        int current_run = mpi_size*j+k;
+        if(current_run >= idt_ctrl.getRunTotal())
+        {
+          break;
+        }
+        std::string current_thist_lines;
+        std::string current_idt_lines;
+        if(k != 0) {
+          mpi_sendrecv_string(k, 0, thist_lines[j], &current_thist_lines, MPI_COMM_WORLD);
+          mpi_sendrecv_string(k, 0, idt_lines[j], &current_idt_lines, MPI_COMM_WORLD);
+        } else {
+          if(mpi_rank == 0) {
+            current_thist_lines = thist_lines[j];
+            current_idt_lines = idt_lines[j];
+          }
+        }
+        if(mpi_rank == 0)
+        {
+            printf("%s",current_thist_lines.c_str());
+            fflush(stdout);
+            fprintf(thistFilePtr,"%s",current_thist_lines.c_str());
+            fflush(thistFilePtr);
+
+            fprintf(idtFilePtr,"%s",current_idt_lines.c_str());
+            fflush(idtFilePtr);
         }
       }
-      if(mpi_rank == 0)
-      {
-          printf("%s",current_thist_lines.c_str());
-          fflush(stdout);
-          fprintf(thistFilePtr,"%s",current_thist_lines.c_str());
-          fflush(thistFilePtr);
+    }
 
-          fprintf(idtFilePtr,"%s",current_idt_lines.c_str());
-          fflush(idtFilePtr);
-      }
+    MPI_Reduce(&maxTime[0],&global_maxTime[0],maxTime.size(),MPI_DOUBLE,MPI_MAX,0,MPI_COMM_WORLD);
+    MPI_Reduce(&minTime[0],&global_minTime[0],minTime.size(),MPI_DOUBLE,MPI_MIN,0,MPI_COMM_WORLD);
+    MPI_Reduce(&avgTime[0],&global_avgTime[0],avgTime.size(),MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD);
+    maxTime = global_maxTime; //over-writing to save mpi logic during printing
+    minTime = global_minTime;
+    avgTime = global_avgTime;
+  } else {
+    if(mpi_rank == 0) {
+      printf("%s",thist_lines[0].c_str());
+      fflush(stdout);
+      fprintf(thistFilePtr,"%s",thist_lines[0].c_str());
+      fflush(thistFilePtr);
+
+      fprintf(idtFilePtr,"%s",idt_lines[0].c_str());
+      fflush(idtFilePtr);
     }
   }
-
-  MPI_Reduce(&maxTime[0],&global_maxTime[0],maxTime.size(),MPI_DOUBLE,MPI_MAX,0,MPI_COMM_WORLD);
-  MPI_Reduce(&minTime[0],&global_minTime[0],minTime.size(),MPI_DOUBLE,MPI_MIN,0,MPI_COMM_WORLD);
-  MPI_Reduce(&avgTime[0],&global_avgTime[0],avgTime.size(),MPI_DOUBLE,MPI_SUM,0,MPI_COMM_WORLD);
-  maxTime = global_maxTime; //over-writing to save mpi logic during printing
-  minTime = global_minTime;
-  avgTime = global_avgTime;
 #endif
 
   if(mpi_rank == 0) {
@@ -617,6 +659,247 @@ void cvReactor(int inp_argc, char **inp_argv)
     fclose(idtFilePtr);
     fclose(thistFilePtr);
   }
+
+  //If sensitivity
+  /*------------------------------------------------------------------------*/
+  if(idt_ctrl.sensitivity_analysis()) {
+    // Perform flame speed sensitivity analysis
+    if(mpi_rank==0) printf("Performing sensitivity analysis\n");
+    idt_ctrl.resetRunId();
+
+    int num_reactions = systemParam.mech->getNumReactions();
+    std::vector<int> sensitive_reactions = idt_ctrl.sensitive_reactions();
+    if(sensitive_reactions.size() > 0) {
+      num_reactions = sensitive_reactions.size();
+    }
+    double multiplier = idt_ctrl.sensitivity_multiplier();
+    int nTrack = idt_ctrl.getNumTrackSpecies();
+    int num_sens = nTrack + 1;
+    std::vector<rxnSens_t> rxnSensList(num_reactions);
+    for(int k = 0; k < num_reactions; ++k) {
+      rxnSensList[k].relSens.assign(num_sens, 0.0);
+    }
+
+    // 1) Save original solution
+    std::vector<double> state_orig(nState, 0.0);
+    for(int j=0; j<nState; j++) {
+      state_orig[j] = massFracPtr[j];
+    }
+    std::vector<double> mole_fractions_orig(nSpc,0.0);
+    systemParam.mech->getXfromY(massFracPtr, mole_fractions_orig.data());
+
+    // 2) Loop over reactions
+#ifdef ZERORK_MPI    
+    const int CHUNK_SIZE = 2;
+    std::vector<int> responsible_ranks(num_reactions,-1);
+    std::unique_ptr<zerork::utilities::mpi_counter> rxn_counter;
+#else
+    const int CHUNK_SIZE = num_reactions;
+#endif
+
+    int sens_percent_complete = 0;
+    double sens_start_time = getHighResolutionTime();
+
+    int k = 0;
+#ifdef ZERORK_MPI
+    k = mpi_rank*CHUNK_SIZE;
+    if(idt_ctrl.sensitivity_load_balance() == 1) {
+      rxn_counter = std::make_unique<zerork::utilities::mpi_counter>(MPI_COMM_WORLD, 0);
+      if(mpi_rank==0) {
+          rxn_counter->increment(mpi_size*CHUNK_SIZE);
+      }
+    }
+#endif
+    while(k < num_reactions) {
+      for(int chunk_idx = 0; chunk_idx < CHUNK_SIZE && k < num_reactions; ++chunk_idx, ++k) {
+        // 2.1) Perturb A factor
+        int reacId = k;
+        if(sensitive_reactions.size() > 0) {
+          reacId = sensitive_reactions[k];
+        }
+        int fwdId = systemParam.mech->getStepIdxOfRxn(reacId,1);
+        int revId = systemParam.mech->getStepIdxOfRxn(reacId,-1);
+
+        systemParam.multipliers.assign(nStep, 1.0);
+	systemParam.multipliers[fwdId] = multiplier;
+        if(revId >= 0 && revId < nStep) {
+	  systemParam.multipliers[revId] = multiplier;
+	}
+
+        // 2.2) Compute solution
+        // initialize the run counters
+        systemParam.sparseMtx->reduceNNZ=0; // won't be set until the first J
+        systemParam.sparseMtx->LUnnz = 0; // won't be set until the first J
+        systemParam.sparseMtx->fillFactor= 100.; // won't be set until the first J
+        systemParam.prevNumErrTestFails = 0;
+        systemParam.nFunc=0;
+        systemParam.nJacSetup=0;
+        systemParam.nJacFactor=0;
+        systemParam.nBackSolve=0;
+        systemParam.nJacRescale=0;
+        systemParam.nColPerm=0;
+        systemParam.colPermTime   = 0;
+        systemParam.jacFactorTime = 0;
+        systemParam.backsolveTime = 0;
+        systemParam.jacSetupTime = 0;
+        systemParam.funcTime = 0;
+        did_cvodeFail=0;
+        isIdtFound=0;
+
+        // Reset state
+        for(int j=0; j<nState; j++) {
+          massFracPtr[j] = state_orig[j];
+        }
+	double T_orig = massFracPtr[nSpc]*idt_ctrl.getRefTemp();
+        //systemParam.Dens = systemParam.mech->getDensityFromTPY(T_orig,systemParam.pressure,massFracPtr);
+        //systemParam.invDens=1.0/systemParam.Dens;
+        //systemParam.volume=systemParam.htxModel->reactor_volume();
+        //systemParam.mass=systemParam.Dens*systemParam.volume;
+        //NV_Ith_S(systemState,nSpc+1)=systemParam.mass;
+
+        //N_Vector tmp_deriv;
+        //tmp_deriv = N_VNew_Serial(nSpc+2);
+        //const_vol_wsr(0.0, systemState, tmp_deriv, (void*)&systemParam);
+        //N_VDestroy_Serial(tmp_deriv);
+
+        //systemParam.tempRoot = idt_ctrl.getInitTemp() + 50; //50 K higher than the inlet
+
+        // reset the time
+        tcurr=0.0;
+        tnext=dtprint;
+        idt=tmax;
+
+        // reinitialize cvode
+        flag = CVodeReInit(cvode_mem, tcurr, systemState);
+        bool failed = false;
+	bool extinguishing = false;
+
+        startTime=getHighResolutionTime();
+
+        while(tcurr<tmax && !failed && !extinguishing)
+        {
+          flag = CVode(cvode_mem, tnext, systemState, &tcurr, CV_NORMAL);
+
+	  if(flag == CV_ROOT_RETURN) {
+            int root_found;
+            flag = CVodeGetRootInfo(cvode_mem, &root_found);
+            if(flag != CV_SUCCESS) {
+              printf("ERROR: CVodeGetRootInfo failed.\n");
+              exit(1);
+            }
+	    if(root_found < 0) {
+	      //Passed our extinction temperature decreasing
+	      extinguishing = true;
+	    }
+          }
+          if (check_flag(&flag, "CVODE ERROR", 1)) {
+            printf("ERROR: psr calculation failed for sensitivity to reaction: %s\n",
+                   systemParam.mech->getReactionName(reacId));
+	    failed = true;
+          }
+
+          tnext+=dtprint;
+        }
+	std::vector<double> mole_fractions_perturb(nSpc,0.0);
+        systemParam.mech->getXfromY(massFracPtr, mole_fractions_perturb.data());
+
+        // 2.3) Compute sensitivity coefficient
+        rxnSensList[k].rxnId = reacId;
+	if(!failed) {
+          //printf("reaction %d / %d, %s, ", k, num_reactions, 
+          //        systemParam.mech->getReactionName(reacId))
+	  //Temperature
+	  double T_perturb = massFracPtr[nSpc]*idt_ctrl.getRefTemp();
+          rxnSensList[k].relSens[0] = (T_perturb - T_orig)/T_orig/(multiplier-1.0);
+          //printf("%14.7e, ",rxnSensList[k].relSens[0]);
+	  //Species
+	  for(int i = 0; i < idt_ctrl.getNumTrackSpecies(); ++i) {
+	    int spcIdx = idt_ctrl.getTrackSpeciesId(i);
+	    double mf_orig = mole_fractions_orig[spcIdx];
+            double mf_perturb= mole_fractions_perturb[spcIdx];
+            rxnSensList[k].relSens[i+1] = (mf_perturb - mf_orig)/mf_orig/(multiplier-1.0);
+            //printf("%14.7e, ",rxnSensList[k].relSens[i+1]);
+	  }
+	}
+
+#ifdef ZERORK_MPI
+        responsible_ranks[k] = mpi_rank;
+#endif
+
+	//Output timing info
+	int last_sens_percent_complete = sens_percent_complete;
+	sens_percent_complete = ((k+1)*100)/num_reactions;
+	if(sens_percent_complete > last_sens_percent_complete) {
+	  double current_time = getHighResolutionTime();
+          double elapsed_time = current_time - sens_start_time; 
+          double estimated_total_time = elapsed_time / (float(k+1)/num_reactions);
+          double estimated_time_left = estimated_total_time - elapsed_time;
+          printf("Completed %d / %d reactions in %g s.", k+1, num_reactions, elapsed_time);
+          printf(" Expect to finish in %g s. (rank=%d)\n", estimated_time_left, mpi_rank); fflush(stdout);
+	}
+      }
+#ifdef ZERORK_MPI
+      if(idt_ctrl.sensitivity_load_balance() == 0) {
+        k += CHUNK_SIZE*(mpi_size-1);
+      } else {
+        k = rxn_counter->increment(CHUNK_SIZE);
+      }
+#endif
+    } // for k<num_reactions
+
+#ifdef ZERORK_MPI
+    MPI_Status status;
+    MPI_Barrier(MPI_COMM_WORLD);
+    std::vector<int> responsible_ranks_root(num_reactions, 0);
+    MPI_Reduce(&responsible_ranks[0], &responsible_ranks_root[0], num_reactions, MPI_INT, MPI_MAX, 0, MPI_COMM_WORLD);
+    for(int k=0; k < num_reactions; ++k) {
+      if(mpi_rank == 0) {
+        int responsible_rank = responsible_ranks_root[k];
+        if(responsible_rank > 0) {
+          MPI_Recv(&rxnSensList[k].rxnId, 1, MPI_INT, responsible_rank, 43, MPI_COMM_WORLD, &status);
+          MPI_Recv(rxnSensList[k].relSens.data(), num_sens, MPI_DOUBLE, responsible_rank, 44, MPI_COMM_WORLD, &status);
+        }
+      } else {
+        int responsible_rank = responsible_ranks[k];
+        if(responsible_rank > 0) {
+          MPI_Send(&rxnSensList[k].rxnId, 1, MPI_INT, 0, 43, MPI_COMM_WORLD);
+          MPI_Send(rxnSensList[k].relSens.data(), num_sens, MPI_DOUBLE, 0, 44, MPI_COMM_WORLD);
+        }
+      }
+    }
+#endif
+ 
+    // Sort sensitivity coefficients in descending order
+    if(mpi_rank == 0) {
+      for(int i = 0; i < num_sens; ++i) {
+        std::stable_sort(rxnSensList.begin(), rxnSensList.end(), [i](rxnSens_t a, rxnSens_t b) {
+		          if(std::abs(a.relSens[i]) > std::abs(b.relSens[i])) {
+			    return true;
+			  }
+			  return false;
+		      });
+
+	std::string name;
+        if(i == 0) {
+	  name = "sensitivityAnalysis_T";
+	} else {
+	  name = std::string("sensitivityAnalysis_") + systemParam.mech->getSpeciesName(idt_ctrl.getTrackSpeciesId(i-1));
+	}
+        FILE * sensFile;
+        sensFile = fopen(name.c_str(),"w");
+        fprintf(sensFile,"#reac_id  reaction         Srel\n");
+        for(int j=0; j<num_reactions; j++) {
+          fprintf(sensFile,"%d  %s  %14.7e\n",
+                  rxnSensList[j].rxnId,
+                  systemParam.mech->getReactionName(rxnSensList[j].rxnId),
+                  rxnSensList[j].relSens[i]);
+        }
+        fclose(sensFile);
+      }
+    }
+    //sensanal_time = getHighResolutionTime() - clock_time;
+  } //if sensitivity_analysis
+  /*------------------------------------------------------------------------*/
 
   // clean up procedures
  // Free ode system parameter memory

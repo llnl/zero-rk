@@ -43,16 +43,22 @@ idt_sweep_params::idt_sweep_params(char *inputFileName)
   getFracsFromCompMap(this->full_mole_fracs(),fullMoleFrac,&nFullSpc,fullSpcIdx);
 
   trackSpcIdx = std::vector<int>();
-  if(this->tracked_species_names().size() > 0) {
-      for(j = 0; j < this->tracked_species_names().size(); ++j) {
-          std::string spcName = this->tracked_species_names()[j];
-          int spcIdx = gasMech->getIdxFromName(spcName.c_str());
-          if(spcIdx == -1) {
-            printf("WARNING: tracked_species %s not found in mechanism. Ignoring\n",spcName.c_str());
-          } else {
-            trackSpcIdx.push_back(spcIdx);
-          }
-      }
+  if(this->print_all_fractions()) {
+    for(j=0; j<nSpc; j++) {
+       trackSpcIdx.push_back(j);
+    }
+  } else {
+    if(this->tracked_species_names().size() > 0) {
+        for(j = 0; j < this->tracked_species_names().size(); ++j) {
+            std::string spcName = this->tracked_species_names()[j];
+            int spcIdx = gasMech->getIdxFromName(spcName.c_str());
+            if(spcIdx == -1) {
+              printf("WARNING: tracked_species %s not found in mechanism. Ignoring\n",spcName.c_str());
+            } else {
+              trackSpcIdx.push_back(spcIdx);
+            }
+        }
+    }
   }
   for(j=0; j<nSpc; j++)
   {
@@ -111,7 +117,6 @@ idt_sweep_params::idt_sweep_params(char *inputFileName)
   maxCvodeFails2     = this->max_cvode_fails2();
   safetyThresh       = this->safety_threshold();
   Tref               = this->reference_temperature();
-  volume             = this->reactor_volume();
   isEnergyEnabled    = this->energy_enabled();
   Kpressure          = this->pressure_controller_coefficient();
 
@@ -296,6 +301,14 @@ void idt_sweep_params::incrementRunId()
     setInitialComp(phi[phiId],egr[egrId]); // update initial composition
   }
   runId++;
+}
+
+void idt_sweep_params::resetRunId()
+{
+  tempId=presId=phiId=egrId=threshId=krylovId=residId=runId=0;
+  if(this->full_mole_fracs().size() == 0) {
+    setInitialComp(phi[phiId],egr[egrId]); // update initial composition
+  }
 }
 
 double idt_sweep_params::getDensity() const

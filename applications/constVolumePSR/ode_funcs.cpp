@@ -41,8 +41,13 @@ int const_vol_wsr(realtype t, N_Vector y, N_Vector ydot,
   cvp->mech->getCfromVY(cvp->invDens,mfp,cvp->conc);
 
   // compute the molar production rates at the current state (aka wdot)
-  cvp->mech->getReactionRates(Temp,cvp->conc,cvp->netProd,cvp->createRate,
-			      cvp->destroyRate,cvp->fwdROP);
+  cvp->mech->getReactionRates_perturbROP(Temp,
+		                         cvp->conc,
+					 cvp->multipliers.data(),
+					 cvp->netProd,
+					 cvp->createRate,
+					 cvp->destroyRate,
+					 cvp->fwdROP);
 
   cvp->mech->getIntEnergy_RT(Temp,cvp->Energy);
   cvp->meanCvMass=cvp->mech->getMassCvFromTY(Temp,mfp,cvp->CvMass);
@@ -57,7 +62,7 @@ int const_vol_wsr(realtype t, N_Vector y, N_Vector ydot,
   // dm/dt = m_in - m_out
   // m_out = K*(Pin-Pout) + m_in
   K = cvp->Kpressure*cvp->volume;
-  mdot_out = std::max(-K*(cvp->pressure-pres) + mdot_in, 0.0);
+  mdot_out = -K*(cvp->pressure-pres) + mdot_in;
   NV_Ith_S(ydot,cvp->nSpc+1)= mdot_in - mdot_out;
 
   // Energy Eq
@@ -78,6 +83,13 @@ int const_vol_wsr(realtype t, N_Vector y, N_Vector ydot,
   cvp->dTemp_dt=-Esum +
     mdot_in*(cvp->enthalpyInlet - usum)/(cvp->mass*cvp->meanCvMass) -
     cvp->pressure*cvp->invDens*mdot_out/cvp->Tref/(cvp->mass*cvp->meanCvMass);
+
+  //Heat transfer model
+  double cp = cvp->mech->getMassCpFromTY(Temp,mfp);
+  cvp->htxModel->Update(Temp,pres,cvp->Dens,cp,cvp->residenceTime,mfp);
+  double H = cvp->htxModel->H();
+  double Qwall = -H*(Temp - cvp->htxModel->wall_temperature());
+  cvp->dTemp_dt += Qwall/(cvp->meanCvMass*cvp->mass*cvp->Tref); // W/[J/(kg K)*kg] = K/s
 
   if(cvp->energyEnabled) {
     NV_Ith_S(ydot,cvp->nSpc)=cvp->dTemp_dt;

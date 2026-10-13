@@ -286,6 +286,15 @@ spify_parser_params.append(
 }
 )
 
+spify_parser_params.append(
+{
+    'name':'pseudo_unsteady_time',
+    'type':'double',
+    'longDesc' : "End time for pseudo-unsteady time-stepping ",
+    'defaultValue' : 0.08
+}
+)
+
 
 
 spify_parser_params.append(
@@ -501,6 +510,24 @@ spify_parser_params.append(
     'name':"sensitivity_load_balance",
     'type':'int',
     'shortDesc' : "Method to distribute sensitivity calcs across ranks [0 - static, 1 - dynamic]",
+    'defaultValue' : 0
+}
+)
+
+spify_parser_params.append(
+{
+    'name':'write_mole_fractions_to_field_files',
+    'type':'bool',
+    'longDesc' : "Flag that when set to true [y] includes mole fractions in field file output",
+    'defaultValue' : 0
+}
+)
+
+spify_parser_params.append(
+{
+    'name':'write_step_rates_to_field_files',
+    'type':'bool',
+    'longDesc' : "Flag that when set to true [y] includes step rates in field file output",
     'defaultValue' : 0
 }
 )

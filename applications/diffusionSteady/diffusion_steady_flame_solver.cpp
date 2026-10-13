@@ -15,6 +15,8 @@
 #include "kinsol_functions.h"
 #include "set_initial_conditions.h"
 
+#include "restart_writer.h"
+
 
 #include <nvector/nvector_parallel.h> // serial N_Vector types, fcts., and macros
 #include <kinsol/kinsol.h>
@@ -53,9 +55,6 @@ static double FindMaximumParallel(const size_t num_points,
 static void WriteFieldParallel(double t,
 			       const double state[],
 			       const FlameParams &params);
-
-static void ReadFieldParallel(double state[],
-                              const FlameParams &params);
 
 static double GetMixtureMolecularMass(const int grid_id,
                                       const double t,
@@ -978,174 +977,217 @@ static void WriteFieldParallel(double t,
   const int num_grid_points_ext = (int)params.z_.size() + 2; //with BC
   const int num_local_points = (int)params.num_local_points_;
   const int num_reactor_states = params.reactor_->GetNumStates();
-  int my_pe, npes;
-  char filename[32], *basename;
+  int num_species = params.reactor_->GetNumSpecies();
+  int num_steps = params.reactor_->GetNumSteps();
+  int npes = params.npes_;
+  int my_pe = params.my_pe_;
+  bool dump_mole_fractions = params.parser_->write_mole_fractions_to_field_files();
+  bool dump_step_rates = params.parser_->write_step_rates_to_field_files();
 
-  int disp;
-  std::vector<double> buffer;
-  buffer.assign(num_local_points, 0.0);
+  int field_count = num_local_points;
+  if(my_pe == 0) field_count +=1; //left BC
+  if(my_pe == npes-1) field_count +=1; //right BC
+ 
+  std::string filename = "data_" + std::to_string(t);
 
-  MPI_File output_file;
-  MPI_Comm_rank(MPI_COMM_WORLD, &my_pe);
-  MPI_Comm_size(MPI_COMM_WORLD, &npes);
+  // Count Variables
+  int num_vars = num_reactor_states; //excludes mass flux
+  if(dump_mole_fractions) num_vars += num_species;
+  if(dump_step_rates) num_vars += num_steps + num_species;
 
-  MPI_Datatype localarray;
-  int order = MPI_ORDER_C;
-  int gsize[1] = {num_grid_points};
-  int lsize[1] = {num_local_points};
-  int start[1] = {my_pe*num_local_points};
-
-  MPI_Type_create_subarray(1,gsize,lsize,start,
-			   order,MPI_DOUBLE,&localarray);
-  MPI_Type_commit(&localarray);
-
-  basename = "data_";
-  sprintf(filename, "%s%f", basename, t);
-
-  MPI_File_open(MPI_COMM_WORLD, filename, MPI_MODE_CREATE | MPI_MODE_RDWR,
-		MPI_INFO_NULL, &output_file);
-
-  // Write header
-  if(my_pe == 0) {
-    MPI_File_write(output_file, &num_grid_points_ext, 1, MPI_INT, MPI_STATUS_IGNORE);//num points
-    MPI_File_write(output_file, &num_reactor_states, 1, MPI_INT, MPI_STATUS_IGNORE);//num variables
-    MPI_File_write(output_file, &t, 1, MPI_DOUBLE, MPI_STATUS_IGNORE); //time
+  // Collect state names
+  std::vector<std::string> state_names(num_vars);
+  for(int j=0; j<num_reactor_states; ++j) {
+    state_names[j] = params.reactor_->GetNameOfStateId(j);
+  }
+  int names_offset = num_reactor_states;
+  if(dump_mole_fractions) {
     for(int j=0; j<num_reactor_states; ++j) {
       std::string state_name = params.reactor_->GetNameOfStateId(j);
-      char buf[64];
-      strcpy(buf, state_name.c_str());
-      MPI_File_write(output_file, &buf, 64, MPI_CHAR, MPI_STATUS_IGNORE); //state name
+      size_t found = state_name.find("MassFraction");
+      if(found != std::string::npos) {
+        state_name.replace(0, 4, "Mole");
+        state_names[names_offset+j] = state_name;
+      }
+    }
+    names_offset += num_species;
+  }
+  if(dump_step_rates) {
+    for(int j=0; j<num_steps; ++j) {
+      std::string step_name;
+      params.reactor_->GetMechanism()->getReactionNameDirOfStep(j, &step_name);
+      state_names[names_offset+j] = step_name + " ROP";
+    }
+    names_offset += num_steps;
+    for(int j=0; j<num_species; ++j) {
+      std::string state_name = params.reactor_->GetNameOfStateId(j);
+      size_t found = state_name.find("MassFraction");
+      if(found != std::string::npos) {
+        state_name.replace(0, 12, "NetProductionRate");
+        state_names[names_offset+j] = state_name;
+      }
     }
   }
 
+  //Instantiate Writer
+  zerork::utilities::RestartWriter writer(filename, field_count, num_vars, t, state_names, params.comm_);
+
+
   // Write data for each variable
+  std::vector<double> buffer(field_count,0);
   for(int j=0; j<num_reactor_states; ++j) {
-    // Write left (oxidizer) BC data
-    if(j==num_reactor_states-1){
-      buffer[0] = params.oxidizer_temperature_*params.ref_temperature_;
-    } else if (j==num_reactor_states-2) {
-      buffer[0] = params.oxidizer_relative_volume_;
-    } else {
-      buffer[0] = params.oxidizer_mass_fractions_[j];
+    int offset = 0;
+    if(my_pe==0) {
+      offset = 1;
+      // Write left (oxidizer) BC data
+      if(j==num_reactor_states-1){
+        buffer[0] = params.oxidizer_temperature_*params.ref_temperature_;
+      } else if (j==num_reactor_states-2) {
+        buffer[0] = params.oxidizer_relative_volume_;
+      } else {
+        buffer[0] = params.oxidizer_mass_fractions_[j];
+      }
     }
-    disp = 2*sizeof(int) + sizeof(double) + num_reactor_states*sizeof(char)*64
-      + j*(npes*num_local_points+2)*sizeof(double);
-    MPI_File_set_view(output_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-    MPI_File_write_all(output_file, &buffer[0], 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
 
     // Write interior data
     for (int k=0; k<num_local_points; ++k) {
-      buffer[k] = state[k*num_reactor_states + j];
+      buffer[k+offset] = state[k*num_reactor_states + j];
       if(j==num_reactor_states-1){
-	buffer[k] *= params.ref_temperature_;
+	buffer[k+offset] *= params.ref_temperature_;
       }
     }
-    disp = 2*sizeof(int) + sizeof(double) + num_reactor_states*sizeof(char)*64
-      + sizeof(double)
-      + j*(npes*num_local_points+2)*sizeof(double);
-    MPI_File_set_view(output_file, disp, MPI_DOUBLE, localarray, "native", MPI_INFO_NULL);
-    MPI_File_write_all(output_file, &buffer[0], num_local_points, MPI_DOUBLE, MPI_STATUS_IGNORE);
 
-    // Write right (fuel) BC data
-    if(j==num_reactor_states-1){
-      buffer[0] = params.fuel_temperature_*params.ref_temperature_;
-    } else if (j==num_reactor_states-2) {
-      buffer[0] = params.fuel_relative_volume_;
-    } else {
-      buffer[0] = params.fuel_mass_fractions_[j];
+    if(my_pe==npes-1) {
+      // Write right (fuel) BC data
+      if(j==num_reactor_states-1) {
+        buffer[num_local_points+offset] = params.fuel_temperature_*params.ref_temperature_;
+      } else if (j==num_reactor_states-2) {
+        buffer[num_local_points+offset] = params.fuel_relative_volume_;
+      } else {
+        buffer[num_local_points+offset] = params.fuel_mass_fractions_[j];
+      }
     }
-    disp = 2*sizeof(int) + sizeof(double) + num_reactor_states*sizeof(char)*64
-      + sizeof(double)
-      + npes*num_local_points*sizeof(double)
-      + j*(npes*num_local_points+2)*sizeof(double);
-    MPI_File_set_view(output_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-    MPI_File_write_all(output_file, &buffer[0], 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
+    writer.WriteField(buffer);
   }
 
-  MPI_File_close(&output_file);
+  if(dump_mole_fractions) {
+    std::vector<double> fuel_mole_fractions(num_species);
+    std::vector<double> oxidizer_mole_fractions(num_species);
+    std::vector<double> state_mole_fractions(num_species*num_local_points);
+    params.reactor_->GetMechanism()->getXfromY(&params.fuel_mass_fractions_[0],&fuel_mole_fractions[0]);
+    params.reactor_->GetMechanism()->getXfromY(&params.oxidizer_mass_fractions_[0],&oxidizer_mole_fractions[0]);
+    for (int k=0; k<num_local_points; ++k) {
+      params.reactor_->GetMechanism()->getXfromY(&state[k*num_reactor_states],&state_mole_fractions[k*num_species]);
+    }
 
-  MPI_Type_free(&localarray);
-}
-
-// Read data file in parallel
-static void ReadFieldParallel(double state[],
-                              const FlameParams &params)
-{
-  const int num_states = params.reactor_->GetNumStates();
-  const int num_local_points = params.num_local_points_;
-  const char* filename1;//[32];
-  char filename2[32];
-  int num_points_file, num_vars_file;
-
-  int npes, my_pe;
-  int disp;
-  std::vector<double> buffer;
-  buffer.assign(num_local_points, 0.0);
-  double time_file = 0.0;
-
-  MPI_File restart_file;
-  npes = params.npes_;
-  my_pe = params.my_pe_;
-
-  filename1 = params.parser_->baseline_file().c_str();
-  sprintf(filename2,"%s",filename1);
-
-  MPI_File_open(MPI_COMM_WORLD, filename2, MPI_MODE_RDONLY, MPI_INFO_NULL, &restart_file);
-
-  MPI_File_read_all(restart_file, &num_points_file, 1, MPI_INT, MPI_STATUS_IGNORE);
-  MPI_File_read_all(restart_file, &num_vars_file, 1, MPI_INT, MPI_STATUS_IGNORE);
-  if(num_vars_file != num_states) {
-    cerr << "WARNING: restart file and mechanism have different number of species. Species not found will be initialized at 0.\n";
-  }
-
-  MPI_File_read_all(restart_file, &time_file, 1, MPI_DOUBLE, MPI_STATUS_IGNORE);
-
-  std::vector<string> file_state_names(num_vars_file);
-  for(int j=0; j<num_vars_file; ++j) {
-    char buf[64];
-    MPI_File_read_all(restart_file, &buf, 64, MPI_CHAR, MPI_STATUS_IGNORE);
-    file_state_names[j] = string(buf);
-  }
-
-  // Initialize y to 0
-  for (int k=0; k<num_local_points*num_states; ++k) {
-    state[k] = 0.0;
-  }
-
-  for(int j=0; j<num_states; ++j) {
-    string state_name = zerork::utilities::GetLowerCase(params.reactor_->GetNameOfStateId(j));
-    for(int i=0; i<num_vars_file; ++i) {
-      string file_state_name = zerork::utilities::GetLowerCase(file_state_names[i]);
-      if(state_name == file_state_name) {
-        // Skip over BC data
-        // Read interior data
-        disp = 2*sizeof(int) + sizeof(double) + num_vars_file*sizeof(char)*64
-          + i*2*sizeof(double) // Left & right BCs from previous variables
-          + sizeof(double) // Left BC from current variable
-          + (my_pe + i*npes)*num_local_points*sizeof(double);
-        MPI_File_set_view(restart_file, disp, MPI_DOUBLE, MPI_DOUBLE, "native", MPI_INFO_NULL);
-        MPI_File_read(restart_file, &buffer[0], num_local_points, MPI_DOUBLE, MPI_STATUS_IGNORE);
-        // Set y values
-        for (int k=0; k<num_local_points; ++k) {
-          state[k*num_states + j] = buffer[k];
-          if(j==num_states-1){
-            state[k*num_states + j] /= params.ref_temperature_;
-          }
-            }
-        // Exit i loop
-        break;
+    for(int j=0; j<num_species; ++j) {
+      // Write left (fuel) BC data
+      int offset = 0;
+      if(my_pe == 0) {
+        offset+=1;
+        buffer[0] = fuel_mole_fractions[j];
       }
-      if (i==num_vars_file-1 && state_name != file_state_names[i]) {
-        // Variable not found
-        cerr << "WARNING: " << state_name << " not found in restart file.\n";
+
+      // Write interior data
+      for (int k=0; k<num_local_points; ++k) {
+        buffer[k+offset] = state_mole_fractions[k*num_species + j];
       }
-    } // for i<num_vars_file
-  } // for j<num_states
 
-  MPI_File_close(&restart_file);
+      if(my_pe == npes-1) {
+        // Write right (oxidizer) BC data
+        buffer[num_local_points+offset] = oxidizer_mole_fractions[j];
+      }
 
+      writer.WriteField(buffer);
+    }
+  }
+
+  if(dump_step_rates) {
+    std::vector<double> creation_rates(num_steps);
+    std::vector<double> destruction_rates(num_steps);
+    std::vector<double> concentrations(num_species);
+
+    std::vector<double> fuel_step_rates(num_steps);
+    std::vector<double> fuel_net_rates(num_species);
+    double relative_volume = params.fuel_relative_volume_;
+    double density         = 1.0/relative_volume;
+    double temperature     = params.fuel_temperature_*params.ref_temperature_;
+    params.reactor_->GetMechanism()->getCfromVY(relative_volume,&params.fuel_mass_fractions_[0],&concentrations[0]);
+    params.reactor_->GetMechanism()->getReactionRates(temperature,&concentrations[0],
+		                                      &fuel_net_rates[0],
+		                                      &creation_rates[0],
+		                                      &destruction_rates[0],
+		                                      &fuel_step_rates[0]);
+
+    std::vector<double> oxidizer_step_rates(num_steps);
+    std::vector<double> oxidizer_net_rates(num_species);
+    relative_volume = params.oxidizer_relative_volume_;
+    density         = 1.0/relative_volume;
+    temperature     = params.oxidizer_temperature_*params.ref_temperature_;
+    params.reactor_->GetMechanism()->getCfromVY(relative_volume,&params.oxidizer_mass_fractions_[0],&concentrations[0]);
+    params.reactor_->GetMechanism()->getReactionRates(temperature,&concentrations[0],
+		                                      &oxidizer_net_rates[0],
+		                                      &creation_rates[0],
+		                                      &destruction_rates[0],
+		                                      &oxidizer_step_rates[0]);
+
+    std::vector<double> state_step_rates(num_steps*num_local_points, 0.0);
+    std::vector<double> state_net_rates(num_species*num_local_points, 0.0);
+    for (int k=0; k<num_local_points; ++k) {
+      relative_volume = state[k*num_reactor_states+num_species];
+      density         = 1.0/relative_volume;
+      temperature     = state[k*num_reactor_states+num_species+1]*params.ref_temperature_;
+      params.reactor_->GetMechanism()->getCfromVY(relative_volume,&state[k*num_reactor_states],&concentrations[0]);
+      params.reactor_->GetMechanism()->getReactionRates(temperature,&concentrations[0],
+                                                        &state_net_rates[k*num_species],
+                                                        &creation_rates[0],
+                                                        &destruction_rates[0],
+                                                        &state_step_rates[k*num_steps]);
+    }
+
+    for(int j=0; j<num_steps; ++j) {
+      int offset = 0;
+      if(my_pe == 0) {
+        offset += 1;
+        // Write left (fuel) BC data
+        buffer[0] = fuel_step_rates[j];
+      }
+
+      // Write interior data
+      for (int k=0; k<num_local_points; ++k) {
+        buffer[k+offset] = state_step_rates[k*num_steps + j];
+      }
+
+      // Write right (oxidizer) BC data
+      if(my_pe == npes-1) {
+        buffer[num_local_points+offset] = oxidizer_step_rates[j];
+      }
+
+      writer.WriteField(buffer);
+    }
+
+    for(int j=0; j<num_species; ++j) {
+      int offset = 0;
+      if(my_pe == 0) {
+        offset += 1;
+        // Write left (fuel) BC data
+        buffer[0] = fuel_net_rates[j];
+      }
+
+      // Write interior data
+      for (int k=0; k<num_local_points; ++k) {
+        buffer[k+offset] = state_net_rates[k*num_species + j];
+      }
+
+
+      if(my_pe == npes-1) {
+        // Write right (oxidizer) BC data
+        buffer[num_local_points+offset] = oxidizer_net_rates[j];
+      }
+      writer.WriteField(buffer);
+    }
+  }
 }
-
 
 static double GetMixtureMolecularMass(const int grid_id,
                                       const double t,

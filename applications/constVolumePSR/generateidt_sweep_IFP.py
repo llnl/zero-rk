@@ -30,6 +30,34 @@ spify_parser_params.append(
 
 spify_parser_params.append(
 {
+    'name':'transport_file',
+    'type':'string',
+    'shortDesc' : "Chemkin Format Transport File",
+    'defaultValue': ''
+}
+)
+
+spify_parser_params.append(
+{
+    'name':'transport_model',
+    'type':'string',
+    'shortDesc' : "Chemkin Format Transport File",
+    'defaultValue': 'ConstantLewis'
+}
+)
+
+spify_parser_params.append(
+{
+    'name':'heat_transfer_model',
+    'type':'string',
+    'shortDesc' : "Wall heat transfer model",
+    'defaultValue': 'none',
+    'discreteValues': ['none', 'Lignola-Reverchon' , 'David-Houzelot-Villermaux'],
+}
+)
+
+spify_parser_params.append(
+{
     'name':'logFile',
     'type':'string',
     'shortDesc' : "Mechanism Parser Log File",
@@ -170,19 +198,10 @@ spify_parser_params.append(
 
 spify_parser_params.append(
 {
-    'name':"reactor_volume",
-    'type':'double',
-    'shortDesc' : "Reactor volume [m3]",
-    'defaultValue' : 1.0
-}
-)
-
-spify_parser_params.append(
-{
     'name':"pressure_controller_coefficient",
     'type':'double',
     'shortDesc' : "K coefficient in pressure controller",
-    'defaultValue' : 1.0e-6
+    'defaultValue' : 1.0e-2
 }
 )
 
@@ -380,6 +399,41 @@ spify_parser_params.append(
 }
 )
 
+spify_parser_params.append(
+{
+    'name':"reactor_radius",
+    'type':'double',
+    'shortDesc' : "Reactor radius in meters",
+    'defaultValue': 1.0e-1,
+}
+)
+
+spify_parser_params.append(
+{
+    'name':"njets",
+    'type':'int',
+    'shortDesc' : "Number of Jets",
+    'defaultValue': 4,
+}
+)
+
+spify_parser_params.append(
+{
+    'name':"djet",
+    'type':'double',
+    'shortDesc' : "Jet Diameter in meters",
+    'defaultValue': 1.0e-3,
+}
+)
+
+spify_parser_params.append(
+{
+    'name':"wall_temperature",
+    'type':'double',
+    'shortDesc' : "Temperature of the wall in Kelvin",
+    'defaultValue': 573,
+}
+)
 
 spify_parser_params.append(
 {
@@ -389,6 +443,63 @@ spify_parser_params.append(
     'defaultValue': 0,
 }
 )
+
+spify_parser_params.append(
+{
+    'name':"ignition_temperature",
+    'type':'double',
+    'shortDesc' : "Set initial temperature",
+    'defaultValue': 0,
+}
+)
+
+
+spify_parser_params.append(
+{
+    'name':"print_all_fractions",
+    'type':'bool',
+    'shortDesc' : "the thing",
+    'defaultValue': 0,
+}
+)
+
+
+spify_parser_params.append(
+{
+    'name':'sensitivity_analysis',
+    'type':'bool',
+    'longDesc' : "Flag that when set to true [y] computes the flame speed and soot reaction sensitivities",
+    'defaultValue' : 0
+}
+)
+
+spify_parser_params.append(
+{
+    'name':'sensitivity_multiplier',
+    'type':'double',
+    'shortDesc' : "A-factor multiplier used for sensitivity analysis",
+    'defaultValue' : 2.0
+}
+)
+
+spify_parser_params.append(
+{
+    'name':"sensitive_reactions",
+    'type':'v_int',
+    'shortDesc' : "Vector of sensitive reactions for sensitivity analysis",
+    'defaultValue' : []
+}
+)
+
+spify_parser_params.append(
+{
+    'name':"sensitivity_load_balance",
+    'type':'int',
+    'shortDesc' : "Method to distribute sensitivity calcs across ranks [0 - static, 1 - dynamic]",
+    'defaultValue' : 0
+}
+)
+
 
 #Make sure we can import SpifyParserGenerator
 sys.path.append(os.path.join(os.path.expandvars(SPIFY_SRC_DIR),'src'))

@@ -7,6 +7,8 @@
 #include <cmath>
 #include <stdio.h>
 
+#include <algorithm>
+
 namespace radau_cpp {
 
 radau::radau(int _n, N_Vector _y0)

@@ -1,0 +1,12 @@
+ELEMENTS
+H N O
+END  
+SPECIES    
+NH2 NO2 H2NO NO
+END
+REACTIONS
+NH2+NO2=H2NO+NO                      1.1E12   0.110   -1186 ! k(tot) #nh3no2#
+DUP
+NH2+NO2=H2NO+NO                     -4.3E17  -1.874     588 ! k(n2o+h2o) 
+DUP
+END

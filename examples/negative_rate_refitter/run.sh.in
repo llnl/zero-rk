@@ -1,0 +1,7 @@
+#!/bin/bash
+
+source "@CMAKE_INSTALL_PREFIX@/share/zerork/python/env/bin/activate"
+
+echo "negative_refit: refitting mechanism"
+python3 -u refit_mech.py >& refit.log
+
