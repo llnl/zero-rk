@@ -104,7 +104,12 @@ if(${SUNDIALS_VERSION} EQUAL "5")
   target_include_directories(zerork_cfd_plugin_gpu PRIVATE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
 
   target_link_libraries(zerork_cfd_plugin_gpu zerork_cuda zerork zerorkutilities superlu spify
-                        sundials_nveccuda sundials_cvode sundials_nvecserial cublas cusolver cudart)
+	  sundials_nveccuda sundials_cvode sundials_nvecserial cublas cusolver cudart)
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER "11.0")
+    find_package(CCCL)
+    target_link_libraries(zerork_cfd_plugin_gpu CCCL::CCCL)
+  endif()
+
   if(${ZERORK_ENABLE_SUNDIALS_LAPACK})
     target_link_libraries(zerork_cfd_plugin_gpu sundials_sunlinsollapackdense)
   endif()

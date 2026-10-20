@@ -8,6 +8,7 @@ ExternalProject_Add(
   URL        https://github.com/LLNL/sundials/archive/refs/tags/v5.8.0.tar.gz
   URL_HASH   MD5=a087032a72127c12e162bfe4405b03cd
   PATCH_COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_LIST_DIR}/SundialsSetupCuda.cmake ${CMAKE_BINARY_DIR}/external/sundials5-build/sundials5-prefix/src/sundials5/cmake/SundialsSetupCuda.cmake
+  COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_LIST_DIR}/Sundials5FindMAGMA.cmake ${CMAKE_BINARY_DIR}/external/sundials5-build/sundials5-prefix/src/sundials5/cmake/tpl/FindMAGMA.cmake
   LIST_SEPARATOR |
   CMAKE_ARGS -DCMAKE_INSTALL_PREFIX=${sundials_prefix}
              -DCMAKE_CUDA_ARCHITECTURES=${CMAKE_CUDA_ARCHITECTURES_EXT}
@@ -18,6 +19,7 @@ ExternalProject_Add(
              -DEXAMPLES_INSTALL=OFF
              -DBUILD_SHARED_LIBS=OFF
              -DBUILD_NVECTOR_MPIMANYVECTOR=OFF
+             -DBUILD_SUNMATRIX_CUSPARSE=OFF
              -DENABLE_MPI=${ENABLE_MPI}
              -DCMAKE_BUILD_TYPE=${ZERORK_EXTERNALS_BUILD_TYPE}
              -DCMAKE_GENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}
