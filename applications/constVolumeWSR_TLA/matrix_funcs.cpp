@@ -1238,7 +1238,7 @@ at_plus_a(
 	  int **b_rowind    /* out - size *bnz */
 	  )
 {
-    register int i, j, k, col, num_nz;
+    int i, j, k, col, num_nz;
     int *t_colptr, *t_rowind; /* a column oriented form of T = A' */
     int *marker;
 
